@@ -134,7 +134,7 @@ def dummy_initialize(module: nn.Module) -> None:
 
 def make_dummy_forward(module: nn.Module, layer_type: str = "attn+mlp") -> None:
     assert layer_type in ["attn+mlp", "attn", "mlp"]
-    # Forward that returns first argument
+
     if layer_type == "attn+mlp":
 
         def dummy_forward(self, hidden_states: torch.Tensor, *args, **kwargs):
@@ -143,12 +143,12 @@ def make_dummy_forward(module: nn.Module, layer_type: str = "attn+mlp") -> None:
     elif layer_type == "attn":
 
         def dummy_forward(self, hidden_states: torch.Tensor, *args, **kwargs):
-            return 0, None, None
+            return torch.zeros_like(hidden_states), None
 
     elif layer_type == "mlp":
 
         def dummy_forward(self, hidden_states: torch.Tensor, *args, **kwargs):
-            return 0
+            return torch.zeros_like(hidden_states)
 
     module.forward = MethodType(dummy_forward, module)
 

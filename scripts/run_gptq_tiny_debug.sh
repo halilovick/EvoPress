@@ -1,4 +1,6 @@
-MODEL="mistralai/Mistral-7B-v0.3"
+#!/bin/bash
+
+MODEL="TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 SEQUENCE_LENGTH=128
 CALIB_DATA="wikitext2"
 
@@ -7,11 +9,11 @@ BITS_LIST="2 3 4"
 BITS_TO_LOAD=3
 GROUP_SIZE=128
 
-SAVE_DIR="./outputs/quant_db_debug"
+SAVE_DIR="./outputs/quant_db_tiny"
 
 mkdir -p "$SAVE_DIR"
 
-torchrun --nnodes=1 --nproc-per-node=1 --master_port 29502 quant.py \
+torchrun --nnodes=1 --nproc-per-node=1 --master_port 29503 quant.py \
     --model_name_or_path "$MODEL" \
     --quantizable_modules '.*layers.*q_proj$' \
     --pre_block_modules model.embed_tokens \
