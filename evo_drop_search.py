@@ -1,3 +1,27 @@
+# Evolutionary depth-pruning search
+#
+# This script searches for a good configuration of transformer blocks/sub-blocks
+# to remove under a fixed pruning budget. Each transformer block contains two
+# searchable sub-blocks: attention and MLP. Depending on the arguments, the search
+# can either drop attention and MLP independently, drop only whole blocks
+# (attention + MLP together), or drop pairs of consecutive whole blocks.
+#
+# A candidate solution is represented as two boolean masks:
+#   removed_state["attn"] -> which attention sub-blocks are removed
+#   removed_state["mlp"]  -> which MLP sub-blocks are removed
+#
+# Removed sub-blocks are not physically deleted from the model during search.
+# Instead, their forward methods are temporarily replaced with dummy forwards,
+# so they behave like skipped/no-op components. Candidate configurations are
+# evaluated using perplexity or KL divergence against the original dense model.
+#
+# The evolutionary loop repeatedly:
+#   1. generates budget-preserving mutations of the current best configuration,
+#   2. evaluates many offspring cheaply on a small calibration subset,
+#   3. keeps the most promising candidates,
+#   4. reevaluates them on more tokens together with the parent (elitism),
+#   5. saves the best surviving drop configuration.
+
 import argparse
 import random
 import os
@@ -323,6 +347,8 @@ def main():
             )
         )
 
+    # important! computes the dense model outputs on the calibration data
+    # during the search, each candidate is compared to these via KL divergence!
     target_logits = []
     if args.fitness_fn == "kl":
         # Compute target logits (calibration)
@@ -416,8 +442,9 @@ def main():
         offspring_list = []
 
         # Generate offspring by Mutation
+        # (level switch mutation)
         while len(offspring_list) < args.offspring:
-            offspring = copy.deepcopy(random.choice(population))
+            offspring = copy.deepcopy(random.choice(population)) # generate offspring from random in population
 
             # Mutation
             num_flips = min(
@@ -431,15 +458,15 @@ def main():
                     subblock_type = "mlp"
 
                 remove_ind = random.randint(0, total_blocks - 1)
-                while offspring[subblock_type][remove_ind]:
+                while offspring[subblock_type][remove_ind]: # loop keeps sampling until it finds a False entry, i.e. currently not dropped.
                     remove_ind = random.randint(0, total_blocks - 1)
 
                 add_ind = random.randint(0, total_blocks - 1)
-                while not offspring[subblock_type][add_ind]:
+                while not offspring[subblock_type][add_ind]: # loop keeps sampling until it finds a True entry, i.e. currently dropped.
                     add_ind = random.randint(0, total_blocks - 1)
 
-                offspring[subblock_type][remove_ind] = True
-                offspring[subblock_type][add_ind] = False
+                offspring[subblock_type][remove_ind] = True # flip from False to True, i.e. drop this block
+                offspring[subblock_type][add_ind] = False # flip from True to False, i.e. add this block back
 
             if args.drop_entire_block:
                 offspring["mlp"] = copy.deepcopy(offspring["attn"])
@@ -453,12 +480,17 @@ def main():
             offspring_list.append(offspring)
 
         # Selection in multiple steps
+        # (multi step selection)
+        # Example:
+        # stage 1: 64 candidates on 2k tokens → keep 8
+        # stage 2: those 8 on 16k tokens → keep 2
+        # stage 3: those 2 + parent on 64k tokens → keep 1
         for num_survive, num_tokens in zip(args.survivors_per_selection, args.tokens_per_selection):
-            if num_survive == args.survivors_per_selection[-1]:
+            if num_survive == args.survivors_per_selection[-1]: # in final selection stage, add current parents back
                 for i in range(
                     len(population)
                 ):  # Elitist EA: Add search points in current generation to final selection step
-                    if population[i] not in offspring_list:
+                    if population[i] not in offspring_list: # parent survives if offsprings are worse
                         offspring_list.append(population[i])
 
             offspring_list, train_fitnesses = selection(
@@ -474,9 +506,9 @@ def main():
                 target_logits=target_logits,
             )
 
-        population = offspring_list
+        population = offspring_list # survivors become next generation's population
 
-        layer_drop_config = get_layer_drop_config(population[0])
+        layer_drop_config = get_layer_drop_config(population[0]) # save current best config
         if args.drop_config_dir:
             os.makedirs(args.drop_config_dir, exist_ok=True)
             with open(os.path.join(args.drop_config_dir, "layer_drop_config.txt"), "w") as f:

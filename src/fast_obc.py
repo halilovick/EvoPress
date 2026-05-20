@@ -1,3 +1,7 @@
+# We want to zero many weights in W, while making the output change as little as possible on calibration data.
+# Naive magnitude pruning would zero the smallest absolute weights.
+# FastOBC uses input statistics / Hessian approximation to estimate which weights are least important.
+
 from typing import List
 
 import torch
@@ -38,7 +42,7 @@ class FastOBC:
     def _validate_layer(layer):
         assert isinstance(layer, (nn.Linear, _ConvNd)), "FastOBC supports only linear and convolutional layers."
 
-    # preparatory methods
+    # preparatory methods, called by the forward hook
     @torch.no_grad()
     def update(self, input: Tensor) -> None:
         """
@@ -70,6 +74,7 @@ class FastOBC:
         # hessian update
         beta = self.num_samples / (self.num_samples + batch_size)
         alpha = 2.0 / (self.num_samples + batch_size)
+        # H ≈ X^T X, where X is the layer input activation matrix
         self.H.addmm_(input.T, input, beta=beta, alpha=alpha)
         # update number of collected samples
         self.num_samples += batch_size
@@ -93,7 +98,7 @@ class FastOBC:
         # get ids of pruned channels
         pruned_ids = torch.diag(self.H) == 0
         self.H[pruned_ids, pruned_ids] = 1
-        # Hessian regularization
+        # Hessian regularization, adds regularization to make Hessian invertible/stable
         damp = self.rel_damp * torch.diag(self.H).mean()
         self.H[range(self.d_col), range(self.d_col)] += damp
         # 2) Weight preparation
@@ -131,9 +136,9 @@ class FastOBC:
                     losses_blk = torch.zeros_like(w_blk)
                     H_inv_cho_blk = H_inv_cho[c1:c2, c1:c2]
                     # 1) score computation
-                    scores = w_blk**2 / H_inv_cho_blk.diag().reshape(1, -1) ** 2
+                    scores = w_blk**2 / H_inv_cho_blk.diag().reshape(1, -1) ** 2 # importance score 
                     thr, _ = torch.kthvalue(scores.view(-1), round(w_blk.numel() * sparsity))
-                    mask = scores > thr
+                    mask = scores > thr # mask that keeps the highest-scoring weights and prunes the lowest-scoring weights
                     # 2) iterate over block
                     for i in range(ncols):
                         w_ci = w_blk[:, i]
@@ -143,10 +148,10 @@ class FastOBC:
                         q[~mask[:, i]] = 0
 
                         res[:, i] = q
-                        err = (w_ci - q) / d
+                        err = (w_ci - q) / d # pruning error
                         losses_blk[:, i] = err**2
 
-                        w_blk[:, i:].addr_(err, H_inv_cho_blk[i, i:], alpha=-1)
+                        w_blk[:, i:].addr_(err, H_inv_cho_blk[i, i:], alpha=-1) # update remaining weights to compensate for the error
                         errs[:, i] = err
                     # 3) update the weights after block
                     w[:, c1:c2] = res

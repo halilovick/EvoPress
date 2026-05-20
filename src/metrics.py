@@ -18,7 +18,11 @@ def compute_perplexity(model, data, batch_size: int = 1):
     # Loop through each batch
     for i in trange(0, num_samples, batch_size, desc="Computing perplexity", leave=False):
         j = min(i + batch_size, num_samples)
-        inputs = torch.cat(data[i:j]).to(device)
+
+        # batch_size = 1, j = 1, i = 0 -> data[0:1] -> [data[0]] -> data[0]
+        # data =[[10, 20, 30, 40], [50, 60, 70, 80]] -> inputs = [[10, 20, 30, 40]] 
+        inputs = torch.cat(data[i:j]).to(device) 
+        
         # Forward pass through the model
         lm_logits = model(inputs).logits
         # Shift logits and labels for next token prediction

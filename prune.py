@@ -1,3 +1,18 @@
+# This script does not perform the EvoPress evolutionary search itself.
+# Instead, it prepares the candidate sparse weight database used later by
+# evo_prune_search.py. For each selected linear projection layer, it collects
+# calibration activations, estimates a Hessian/input covariance matrix, and uses
+# a FastOBC/SparseGPT-style pruning backend to generate several sparse versions
+# of that layer around the target average sparsity.
+#
+# The saved files are organized as:
+#   save_dir/<layer_name>/<level>.pth
+#
+# where level 0 corresponds to the target sparsity, negative levels are denser
+# than the target, and positive levels are more sparse. The later evolutionary
+# search chooses one saved level per layer while preserving the global sparsity
+# budget.
+
 import os
 import argparse
 import time
@@ -125,6 +140,7 @@ def main():
     if dist_utils.is_dist_available_and_initialized():
         num_seq_per_rank = len(calibration_data) // world_size
         calibration_data = calibration_data[rank * num_seq_per_rank : (rank + 1) * num_seq_per_rank]
+    # Reformatting calibration data to be compatible with the pruning loop (list of tuples of (args, kwargs))
     calibration_data = [([], {"input_ids": input_ids}) for input_ids in calibration_data]
     dist.barrier()
     # Pruner
@@ -143,6 +159,7 @@ def main():
         verbose=args.verbose,
     )
     # Prepare weight diff (if not defined)
+    # weight diff = controls the spacing between sparsity levels
     if not args.weights_diff:
         hidden_size = get_hidden_size(model)
         args.weights_diff = int(0.5 * min(args.sparsity, 1 - args.sparsity) / args.num_levels * hidden_size**2)

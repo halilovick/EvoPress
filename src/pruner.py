@@ -51,16 +51,18 @@ class FastOBCPruner:
         """
         device = self.device or next(self.model.parameters()).device
         # prepare pre blocks modules
-        blocks = self._get_submodule(self.block_modules)
-        pre_blocks = [self._get_submodule(module_name) for module_name in self.pre_block_modules]
-        blocks[0] = blocks[0].to(device)
+        blocks = self._get_submodule(self.block_modules) # transformer decoded layers, each contains attention and mlp modules
+        pre_blocks = [self._get_submodule(module_name) for module_name in self.pre_block_modules] # usually embedding and final norm layers
+        blocks[0] = blocks[0].to(device) # move first block to GPU
         for module in pre_blocks:
-            module.to(device)
+            module.to(device) # move each preblock to GPU
         # Cache
         if hasattr(self.model.config, "use_cache"):
             use_cache = self.model.config.use_cache
-            self.model.config.use_cache = False
-        # Input preparation #
+            self.model.config.use_cache = False # disable cache because no generation cache is needed for pruning
+        # Input preparation 
+        # First we need the output of the embedding layer, because that is the input to Block 0. 
+        # Then we prune Block 0, compute its output, use that as input to Block 1, prune Block 1, etc..
         blocks[0] = InputCollector(blocks[0], cpu_offload=self.cpu_offload_activations)
         # TODO make namedtuple
         for inp_args, inp_kwargs in self.data_loader:
@@ -87,19 +89,28 @@ class FastOBCPruner:
                 dist_utils.print_on_main(f"Processing {self.block_modules} {block_id}/{len(blocks)}.")
             block = block.to(device)
             # get layer prefix to select layers only within the block
-            layer_prefix = f"{self.block_modules}.{block_id}."
+            # we take self_attn.q_proj, k_proj, v_proj, o_proj, mlp.gate_proj, up_proj, down_proj for each block
+            layer_prefix = f"{self.block_modules}.{block_id}." # model.layers.0.
+            
+            # model.layers.0.self_attn.q_proj, model.layers.0.self_attn.k_proj, etc.
             layers = select_layers(self.model, layer_prefix, self.prunable_modules, LINEAR_LAYERS)
+            
+            # hook = function that automatically runs when a module does a forward pass
+            # handle = FastOBC object that collects activation statistics and later prunes the layer
             handles, hooks = self._prepare_hooks_and_handles(layers)
 
+            # run forward pass once to collect activation statistics
             for inp_args, inp_kwargs in zip(input_args, input_kwargs):
                 out = block(*to(inp_args, device=device), **to(inp_kwargs, device=device))
 
+            # remove hooks
             for _, h in hooks.items():
                 h.remove()
 
             if dist_utils.is_dist_available_and_initialized():
                 dist.barrier()
 
+            # create sparsity levels
             self._prune_group(handles, sparsity, weights_diff, num_levels)
 
             for inp_args, inp_kwargs in zip(input_args, input_kwargs):

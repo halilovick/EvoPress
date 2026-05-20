@@ -1,3 +1,24 @@
+# Quantized weight database generation step.
+#
+# This script does not perform the EvoPress evolutionary search itself.
+# Instead, it prepares the candidate quantization database used later by
+# evo_quant_search.py. For each selected linear projection layer, it collects
+# calibration activations, estimates a Hessian/input covariance matrix, and uses
+# a GPTQ/FastOBQ-style backend to generate quantized versions of the layer at
+# several bitwidths.
+#
+# The saved files are organized as:
+#   save_dir/<model_name>/<calibration_bitwidth>bit/<layer_name>/<bit>.pth
+#
+# Each file contains the dequantized float reconstruction of the quantized
+# weight tensor for that bitwidth. During database generation, the model is
+# processed block by block. After a layer is quantized, the calibration bitwidth
+# version is inserted back into the model as QLinear so later blocks are
+# calibrated on activations coming from already-quantized previous blocks.
+#
+# The later evolutionary search chooses one saved bitwidth per layer while
+# satisfying a global average bitwidth budget.
+
 import os
 import argparse
 import time

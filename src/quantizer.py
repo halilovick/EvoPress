@@ -57,6 +57,8 @@ class Quantizer:
             use_cache = self.model.config.use_cache
             self.model.config.use_cache = False
         # Input preparation #
+        # collect inputs to block 0
+        # this captures the hidden states that enter the firs transformer block, then interrupts
         blocks[0] = InputCollector(blocks[0], cpu_offload=self.cpu_offload_activations)
         # TODO make namedtuple
         for inp_args, inp_kwargs in self.data_loader:
@@ -84,6 +86,7 @@ class Quantizer:
             block = block.to(device)
             # get layer prefix to select layers only within the block
             layer_prefix = f"{self.block_modules}.{block_id}."
+            # this selects 0.self_attn.q_proj, 0.self_attn.k_proj, 0.self_attn.v_proj, 0.self_attn.o_proj, 0.mlp.up_proj, 0.mlp.down_proj, 0.mlp_gate_proj
             layers = select_layers(self.model, layer_prefix, self.quantizable_modules, LINEAR_LAYERS)
             handles, hooks = self._prepare_hooks_and_handles(bitwidth_options, layers)
 
