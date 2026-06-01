@@ -1,0 +1,4 @@
+none
+mlp
+attn
+attn+mlp
