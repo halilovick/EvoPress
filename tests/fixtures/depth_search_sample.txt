@@ -1,0 +1,33 @@
+5
+Generation 1/5
+Train fitness 7.50e-01
+Parent: attn: [1, 0, 0, 1] mlp: [0, 1, 1, 0]
+wikitext2: 994.00
+full train ppl: 9.80e+02
+Generation 2/5
+Train fitness 5.25e-01
+Parent: attn: [0, 1, 0, 1] mlp: [0, 1, 1, 0]
+wikitext2: 410.50
+full train ppl: 4.00e+02
+Generation 3/5
+Train fitness 2.50e-01
+Parent: attn: [0, 1, 1, 0] mlp: [0, 1, 0, 1]
+wikitext2: 190.25
+full train ppl: 1.80e+02
+Generation 4/5
+Train fitness 1.25e-01
+Parent: attn: [0, 0, 1, 1] mlp: [1, 0, 0, 1]
+wikitext2: 110.75
+full train ppl: 1.05e+02
+Generation 5/5
+Train fitness 8.00e-02
+Parent: attn: [0, 0, 1, 1] mlp: [1, 0, 1, 0]
+wikitext2: 92.00
+full train ppl: 9.00e+01
+Final configuration:
+none
+mlp
+attn
+attn+mlp
+wikitext2: 85.00
+full train ppl: 8.40e+01

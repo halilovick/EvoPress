@@ -1,0 +1,1 @@
+date,run_id,method,model,sparsity_or_bits,generations,offspring,calibration_data,sequence_length,calibration_tokens,fitness_fn,attention_impl,dtype,seed,wikitext2_ppl,train_ppl,runtime_minutes,gpu_name,gpu_vram_gb,cpu_ram_limit_gb,status,notes,output_dir
