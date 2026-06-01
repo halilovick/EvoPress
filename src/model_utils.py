@@ -163,7 +163,7 @@ class ZeroMLP(nn.Module):
         super().__init__()
 
     def forward(self, hidden_states: torch.Tensor, *args, **kwargs):
-        return 0
+        return torch.zeros_like(hidden_states)
 
 
 class ZeroAttention(nn.Module):
@@ -224,7 +224,8 @@ def drop_layers(model, drop_config: List[int]):
             setattr(layers[layer_id], attn_layer_name, ZeroAttention(layer_idx=layer_id))
         # Remove both mlp and attention
         elif drop_config[layer_id] == "attn+mlp":
-            layers[layer_id] = IdentityLayer(layer_idx=layer_id)
+            setattr(layers[layer_id], attn_layer_name, ZeroAttention(layer_idx=layer_id))
+            setattr(layers[layer_id], mlp_layer_name, ZeroMLP())
 
 
 def drop_layers_from_config(model, drop_config_path: str):
