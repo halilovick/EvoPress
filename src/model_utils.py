@@ -172,11 +172,8 @@ class ZeroAttention(nn.Module):
         super().__init__()
         self.layer_idx = layer_idx
 
-    def forward(self, hidden_states: torch.Tensor, past_key_value=None, *args, **kwargs):
-        past_key_value = getattr(self, "past_key_value", past_key_value)
-        if past_key_value is not None and hasattr(past_key_value, "update"):
-            past_key_value.update(torch.empty(1, 1, 1), torch.empty(1, 1, 1), self.layer_idx, {})
-        return 0, None, past_key_value
+    def forward(self, hidden_states: torch.Tensor, *args, **kwargs):
+        return torch.zeros_like(hidden_states), None
 
 
 class IdentityLayer(nn.Module):
