@@ -1,0 +1,2 @@
+run_id,sparsity,method,seed,calibration_seed,wikitext2_ppl,train_ppl,dropped_attn_modules,dropped_mlp_modules,reference_config,output_dir
+baseline_random_mistral7b_s0.25_seed2,0.25,random,2,1,2490.00,2.55e+03,8,8,results/runs/depth_mistral7b_s0.25_seed1/layer_drop_config.txt,outputs/experiments/baseline_random_mistral7b_s0.25_seed2
