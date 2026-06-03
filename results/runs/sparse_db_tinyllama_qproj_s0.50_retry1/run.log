@@ -1,0 +1,103 @@
+run_id=sparse_db_tinyllama_qproj_s0.50_retry1
+output_dir=outputs/experiments/sparse_db_tinyllama_qproj_s0.50_retry1
+save_dir=outputs/experiments/sparse_db_tinyllama_qproj_s0.50_retry1/sparse_db
+started_at=2026-06-02T22:08:58Z
+command_file=outputs/experiments/sparse_db_tinyllama_qproj_s0.50_retry1/command.sh
+memory_samples_file=outputs/experiments/sparse_db_tinyllama_qproj_s0.50_retry1/memory_samples.csv
+
+2026-06-02 22:09:04.378397: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-06-02 22:09:04.440401: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/attr_value.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/tensor.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/resource_handle.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/tensor_shape.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/types.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/full_type.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/function.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/node_def.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/op_def.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/graph.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/graph_debug_info.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/versions.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/protobuf/config.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at xla/tsl/protobuf/coordination_config.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/cost_graph.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/step_stats.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/allocation_description.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/framework/tensor_description.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/protobuf/cluster.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+/opt/micromamba/lib/python3.11/site-packages/google/protobuf/runtime_version.py:98: UserWarning: Protobuf gencode version 5.28.3 is exactly one major version older than the runtime version 6.31.1 at tensorflow/core/protobuf/debug.proto. Please update the gencode to avoid compatibility violations in the next runtime release.
+  warnings.warn(
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading WikiText2
+Token indices sequence length is longer than the specified maximum sequence length for this model (2874558 > 2048). Running this sequence through the model will result in indexing errors
+Preparing calibration data:   0%|                                                                             | 0/4 [00:00<?, ?it/s]Preparing calibration data: 100%|██████████████████████████████████████████████████████████████████| 4/4 [00:00<00:00, 12965.39it/s]
+/opt/micromamba/lib/python3.11/site-packages/torch/distributed/distributed_c10d.py:4807: UserWarning: No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. 
+  warnings.warn(  # warn only once
+[rank0]:[W602 22:09:38.787329766 ProcessGroupNCCL.cpp:5023] [PG ID 0 PG GUID 0 Rank 0]  using GPU 0 as device used by this process is currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. You can specify device_id in init_process_group() to force use of a particular device.
+Processing model.layers 0/22.
+Pruning model.layers.0.self_attn.q_proj
+Processing model.layers 1/22.
+Pruning model.layers.1.self_attn.q_proj
+Processing model.layers 2/22.
+Pruning model.layers.2.self_attn.q_proj
+Processing model.layers 3/22.
+Pruning model.layers.3.self_attn.q_proj
+Processing model.layers 4/22.
+Pruning model.layers.4.self_attn.q_proj
+Processing model.layers 5/22.
+Pruning model.layers.5.self_attn.q_proj
+Processing model.layers 6/22.
+Pruning model.layers.6.self_attn.q_proj
+Processing model.layers 7/22.
+Pruning model.layers.7.self_attn.q_proj
+Processing model.layers 8/22.
+Pruning model.layers.8.self_attn.q_proj
+Processing model.layers 9/22.
+Pruning model.layers.9.self_attn.q_proj
+Processing model.layers 10/22.
+Pruning model.layers.10.self_attn.q_proj
+Processing model.layers 11/22.
+Pruning model.layers.11.self_attn.q_proj
+Processing model.layers 12/22.
+Pruning model.layers.12.self_attn.q_proj
+Processing model.layers 13/22.
+Pruning model.layers.13.self_attn.q_proj
+Processing model.layers 14/22.
+Pruning model.layers.14.self_attn.q_proj
+Processing model.layers 15/22.
+Pruning model.layers.15.self_attn.q_proj
+Processing model.layers 16/22.
+Pruning model.layers.16.self_attn.q_proj
+Processing model.layers 17/22.
+Pruning model.layers.17.self_attn.q_proj
+Processing model.layers 18/22.
+Pruning model.layers.18.self_attn.q_proj
+Processing model.layers 19/22.
+Pruning model.layers.19.self_attn.q_proj
+Processing model.layers 20/22.
+Pruning model.layers.20.self_attn.q_proj
+Processing model.layers 21/22.
+Pruning model.layers.21.self_attn.q_proj
+Pruning took 55.85345977265388 s.
+[rank0]:[W602 22:10:35.809764167 ProcessGroupNCCL.cpp:1538] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
