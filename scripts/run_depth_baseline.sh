@@ -25,6 +25,7 @@ REFERENCE_CONFIG="${REFERENCE_CONFIG:-results/runs/depth_mistral7b_s${SPARSITY}_
 RUN_ID="${RUN_ID:-baseline_${METHOD}_mistral7b_s${SPARSITY}_seed${SEED}}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUTS_ROOT}/${RUN_ID}}"
 DRY_RUN="${DRY_RUN:-0}"
+CHECK_RUNTIME_DEPENDENCIES="${CHECK_RUNTIME_DEPENDENCIES:-1}"
 
 usage() {
     cat <<'EOF'
@@ -97,6 +98,12 @@ fi
 
 directory_has_files() {
     [[ -d "$1" ]] && [[ -n "$(find "$1" -mindepth 1 -maxdepth 1 -print -quit)" ]]
+}
+
+check_runtime_dependencies() {
+    if [[ "$CHECK_RUNTIME_DEPENDENCIES" == "1" ]]; then
+        "$PYTHON_BIN" scripts/check_runtime_dependencies.py --require-cuda
+    fi
 }
 
 write_command_file() {
@@ -213,6 +220,8 @@ if [[ "$DRY_RUN" == "1" ]]; then
     printf '\n'
     exit 0
 fi
+
+check_runtime_dependencies || exit 2
 
 if directory_has_files "$OUTPUT_DIR"; then
     printf 'Refusing to overwrite non-empty output directory: %s\n' "$OUTPUT_DIR" >&2

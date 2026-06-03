@@ -35,6 +35,7 @@ CPU_OFFLOAD_ACTIVATIONS="${CPU_OFFLOAD_ACTIVATIONS:-1}"
 VERBOSE="${VERBOSE:-1}"
 MEMORY_POLL_INTERVAL_SECONDS="${MEMORY_POLL_INTERVAL_SECONDS:-5}"
 DRY_RUN="${DRY_RUN:-0}"
+CHECK_RUNTIME_DEPENDENCIES="${CHECK_RUNTIME_DEPENDENCIES:-1}"
 
 read -r -a PRE_BLOCK_MODULES_ARGS <<< "$PRE_BLOCK_MODULES"
 
@@ -126,6 +127,12 @@ fi
 
 directory_has_files() {
     [[ -d "$1" ]] && [[ -n "$(find "$1" -mindepth 1 -maxdepth 1 -print -quit)" ]]
+}
+
+check_runtime_dependencies() {
+    if [[ "$CHECK_RUNTIME_DEPENDENCIES" == "1" ]]; then
+        "$PYTHON_BIN" scripts/check_runtime_dependencies.py --require-cuda
+    fi
 }
 
 write_command_file() {
@@ -307,6 +314,8 @@ if [[ "$DRY_RUN" == "1" ]]; then
     printf '\n'
     exit 0
 fi
+
+check_runtime_dependencies || exit 2
 
 if directory_has_files "$OUTPUT_DIR"; then
     printf 'Refusing to overwrite non-empty output directory: %s\n' "$OUTPUT_DIR" >&2
