@@ -1,0 +1,5 @@
+sparsity,sparsity_label,dense_wikitext2_ppl,evopress_wikitext2_ppl,evopress_run_id,random_mean_wikitext2_ppl,random_std_wikitext2_ppl,random_median_wikitext2_ppl,random_completed_n,random_failed_n,late_layer_wikitext2_ppl,late_layer_run_id,late_layer_failed_n
+0.125,12.5%,5.35,6.75,depth_mistral7b_s0.125_seed1,12693.60,21957.56,21.50,3,3,61.16,baseline_late_layer_mistral7b_s0.125_seed1_retry1,1
+0.25,25.0%,5.35,14.70,depth_mistral7b_s0.25_seed1,5435.12,7334.10,2490.00,3,0,541.00,baseline_late_layer_mistral7b_s0.25_seed1_retry1,1
+0.375,37.5%,5.35,51.69,depth_mistral7b_s0.375_seed1,5456.67,4863.72,4476.00,3,0,1419.00,baseline_late_layer_mistral7b_s0.375_seed1_retry1,1
+0.50,50.0%,5.35,371.75,depth_mistral7b_s0.50_seed1,15516.00,9939.09,15516.00,2,1,4992.00,baseline_late_layer_mistral7b_s0.50_seed1_retry1,1
