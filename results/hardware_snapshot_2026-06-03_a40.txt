@@ -1,0 +1,44 @@
+Hardware snapshot date: 2026-06-03
+Context: Current TU Wien Datalab allocation. Earlier runs used both Tesla T4 and NVIDIA A40 depending on availability.
+
+===== nvidia-smi =====
+Wed Jun  3 10:39:46 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.105.08             Driver Version: 580.105.08     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA A40                     On  |   00000000:06:00.0 Off |                    0 |
+|  0%   28C    P8             32W /  300W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+
+===== free -h =====
+               total        used        free      shared  buff/cache   available
+Mem:           472Gi        12Gi       210Gi       111Mi       252Gi       459Gi
+Swap:             0B          0B          0B
+
+===== df -h . =====
+Filesystem                                                                  Size  Used Avail Use% Mounted on
+10.0.2.1:6789,10.0.2.2:6789,10.0.2.3:6789,10.0.2.4:6789,10.0.2.5:6789:/hub  909T  693T  216T  77% /home/jovyan
+
+===== cgroup memory.max =====
+17179869184
+
+===== memory.max in GB =====
+16.00 GB
+
+===== PyTorch CUDA =====
+cuda_available: True
+device: NVIDIA A40
+memory_gb: 44.42193603515625
