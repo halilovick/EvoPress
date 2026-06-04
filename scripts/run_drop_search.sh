@@ -24,6 +24,7 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 EVO_DROP_SEARCH_SCRIPT="${EVO_DROP_SEARCH_SCRIPT:-evo_drop_search.py}"
 EXPERIMENT_LOG="${EXPERIMENT_LOG:-results/experiment_log.csv}"
 OUTPUTS_ROOT="${OUTPUTS_ROOT:-outputs/experiments}"
+METHOD="${METHOD:-depth_evo}"
 RUN_ID="${RUN_ID:-depth_mistral7b_s${SPARSITY}_seed${SEED}}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUTS_ROOT}/${RUN_ID}}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -184,7 +185,7 @@ append_experiment_row() {
     "$PYTHON_BIN" scripts/append_experiment_log.py \
         --log-file "$EXPERIMENT_LOG" \
         --run-id "$RUN_ID" \
-        --method depth_evo \
+        --method "$METHOD" \
         --model "$MODEL" \
         --sparsity-or-bits "$SPARSITY" \
         --generations "$GENERATIONS" \
