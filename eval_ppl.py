@@ -1,7 +1,7 @@
 import os
 import argparse
 from functools import partial
-from typing import Optional, Union, Optional
+from typing import Optional, Union
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -144,6 +144,17 @@ def load_compressed_weights(
     return model
 
 
+def apply_compression(args: argparse.Namespace, model: AutoModelForCausalLM):
+    """Apply optional compression components in a deterministic order."""
+    if args.sparse_weights_path:
+        load_compressed_weights(model, args.sparse_weights_path, args.sparse_config_path, args.sparse_default_level)
+    if args.quant_weights_path:
+        load_compressed_weights(model, args.quant_weights_path, args.quant_config_path, args.quant_default_level)
+    if args.drop_layer_config:
+        drop_layers_from_config(model, args.drop_layer_config)
+    return model
+
+
 def main():
     args = parse_args()
     # Get device and dtype
@@ -167,12 +178,7 @@ def main():
     )
     model.config.use_cache = False  # do not use cache
 
-    if args.drop_layer_config:
-        drop_layers_from_config(model, args.drop_layer_config)
-    elif args.sparse_weights_path:
-        load_compressed_weights(model, args.sparse_weights_path, args.sparse_config_path, args.sparse_default_level)
-    elif args.quant_weights_path:
-        load_compressed_weights(model, args.quant_weights_path, args.quant_config_path, args.quant_default_level)
+    apply_compression(args, model)
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=args.use_fast_tokenizer)
     args.sequence_length = args.sequence_length or model.config.max_position_embeddings
