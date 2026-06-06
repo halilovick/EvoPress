@@ -1,0 +1,3 @@
+runtime_seconds=30
+runtime_minutes=0.50
+exit_code=0
