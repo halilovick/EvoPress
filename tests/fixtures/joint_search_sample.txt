@@ -1,0 +1,29 @@
+Generation 1/2
+Train fitness: 3.0000e-02
+Drop config:
+['none', 'attn', 'mlp', 'none']
+Quant state:
+[3, 3, 3, 3]
+Quant bit average: 3.0000e+00
+wikitext2: 12.40
+ppl_train: 12.80
+Generation 2/2
+Train fitness: 1.5000e-02
+Drop config:
+['none', 'attn', 'none', 'mlp']
+Quant state:
+[2, 4, 3, 3]
+Quant bit average: 3.0000e+00
+wikitext2: 11.90
+ppl_train: 12.20
+Final joint configuration saved to:
+outputs/fixture
+Final drop config:
+['none', 'attn', 'none', 'mlp']
+Final quant state:
+[2, 4, 2, 4]
+Final quant bit average: 3.0000e+00
+Final dropped attention modules: 1
+Final dropped MLP modules: 1
+wikitext2: 11.70
+ppl_train: 12.00

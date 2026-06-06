@@ -578,6 +578,9 @@ def main():
     print("Final quant state:")
     for group in parent["quant"]:
         print(group)
+    print(f"Final quant bit average: {candidate_bits(model, grouped_layer_names, parent['quant']) / quantizable_weights:.4e}")
+    print(f"Final dropped attention modules: {sum(parent['drop']['attn'])}")
+    print(f"Final dropped MLP modules: {sum(parent['drop']['mlp'])}")
 
     # Final evaluation.
     apply_joint_state(model, layers, grouped_layer_names, parent, args.quant_weights_path)
