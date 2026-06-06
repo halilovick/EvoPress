@@ -1,0 +1,22 @@
+Generation 1/2
+Current search point:
+[3, 3, 3, 3]
+Parent bits: 1200
+Bit average: 3.0000e+00
+Train fitness: inf
+wikitext2: 9.50
+ppl_train: 9.80
+Train fitnesses: 2.50e-02
+Generation 2/2
+Current search point:
+[2, 4, 3, 3]
+Parent bits: 1200
+Bit average: 3.0000e+00
+Train fitness: 2.5000e-02
+wikitext2: 9.30
+ppl_train: 9.60
+Train fitnesses: 1.25e-02
+Final configuration:
+[2, 4, 2, 4]
+wikitext2: 9.10
+ppl_train: 9.40

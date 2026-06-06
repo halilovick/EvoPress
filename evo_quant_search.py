@@ -212,6 +212,12 @@ def parse_args():
         help="Attention implementation: eager, sdpa, or flash_attention_2",
     )
     parser.add_argument("--use_fast_tokenizer", action="store_true", help="Whether to use fast tokenizer.")
+    parser.add_argument(
+        "--configuration_name",
+        type=str,
+        default=None,
+        help="Filename for the final quantization configuration. Defaults to the legacy generated name.",
+    )
     args = parser.parse_args()
     return args
 
@@ -503,7 +509,7 @@ def main():
         print(f"Train fitnesses: {train_fitness:.2e}")
         log_dict["train_fitness"] = train_fitness
     # Save final configuration
-    configuration_name = f"evo-{args.fitness_fn}-configuration-{args.target_bitwidth}.txt"
+    configuration_name = args.configuration_name or f"evo-{args.fitness_fn}-configuration-{args.target_bitwidth}.txt"
     with open(os.path.join(args.quant_weights_path, configuration_name), "w") as f:
         for i in range(num_groups):
             f.write(
@@ -516,6 +522,7 @@ def main():
     for group in parent:
         print(group)
     # Final evaluation
+    load_layers(model, grouped_layer_names, parent, args.quant_weights_path)
     for eval_dataset_name, eval_dataset in zip(args.eval_datasets, eval_datasets):
         ppl_eval = compute_perplexity(model, eval_dataset)
         print(f"{eval_dataset_name}: {ppl_eval:.2f}")
