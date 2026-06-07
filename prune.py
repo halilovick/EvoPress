@@ -101,6 +101,11 @@ def parse_args():
     )
     parser.add_argument("--cpu_offload_modules", action="store_true", help="whether to offload modules to CPU.")
     parser.add_argument("--cpu_offload_activations", action="store_true", help="whether to offload activations to CPU.")
+    parser.add_argument(
+        "--drop_saved_file_cache",
+        action="store_true",
+        help="Flush and evict each saved candidate file from Linux page cache to reduce cgroup RAM pressure.",
+    )
     parser.add_argument("--verbose", action="store_true", help="whether to log progress.")
     args = parser.parse_args()
     return args
@@ -156,6 +161,7 @@ def main():
         device=device,
         cpu_offload_modules=args.cpu_offload_modules,
         cpu_offload_activations=args.cpu_offload_activations,
+        drop_saved_file_cache=args.drop_saved_file_cache,
         verbose=args.verbose,
     )
     # Prepare weight diff (if not defined)

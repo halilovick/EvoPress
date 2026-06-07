@@ -36,6 +36,7 @@ VERBOSE="${VERBOSE:-1}"
 MEMORY_POLL_INTERVAL_SECONDS="${MEMORY_POLL_INTERVAL_SECONDS:-5}"
 DRY_RUN="${DRY_RUN:-0}"
 CHECK_RUNTIME_DEPENDENCIES="${CHECK_RUNTIME_DEPENDENCIES:-1}"
+DROP_SAVED_FILE_CACHE="${DROP_SAVED_FILE_CACHE:-1}"
 
 read -r -a PRE_BLOCK_MODULES_ARGS <<< "$PRE_BLOCK_MODULES"
 
@@ -123,6 +124,9 @@ if [[ "$CPU_OFFLOAD_ACTIVATIONS" == "1" ]]; then
 fi
 if [[ "$VERBOSE" == "1" ]]; then
     COMMAND+=(--verbose)
+fi
+if [[ "$DROP_SAVED_FILE_CACHE" == "1" ]]; then
+    COMMAND+=(--drop_saved_file_cache)
 fi
 
 directory_has_files() {
@@ -259,6 +263,7 @@ write_db_summary() {
         printf 'prunable_modules=%s\n' "$PRUNABLE_MODULES"
         printf 'sparsity=%s\n' "$SPARSITY"
         printf 'num_levels=%s\n' "$NUM_LEVELS"
+        printf 'drop_saved_file_cache=%s\n' "$DROP_SAVED_FILE_CACHE"
         printf 'calibration_data=%s\n' "$CALIB_DATA"
         printf 'calibration_tokens=%s\n' "$CALIB_TOKENS"
         printf 'sequence_length=%s\n' "$SEQUENCE_LENGTH"
@@ -381,12 +386,12 @@ write_db_summary \
     "$LAST_PROGRESS"
 
 STATUS=completed
-NOTES="last_successful_step=sparse_database_generated; prunable_modules=${PRUNABLE_MODULES}; num_levels=${NUM_LEVELS}; metadata_present=${METADATA_PRESENT}; generated_module_dirs=${MODULE_DIRS}; generated_level_files=${LEVEL_FILES}; database_size_mb=${DATABASE_SIZE_MB}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
+NOTES="last_successful_step=sparse_database_generated; prunable_modules=${PRUNABLE_MODULES}; num_levels=${NUM_LEVELS}; drop_saved_file_cache=${DROP_SAVED_FILE_CACHE}; metadata_present=${METADATA_PRESENT}; generated_module_dirs=${MODULE_DIRS}; generated_level_files=${LEVEL_FILES}; database_size_mb=${DATABASE_SIZE_MB}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
 FINAL_EXIT_CODE=0
 
 if [[ "$RUN_EXIT_CODE" != "0" ]]; then
     STATUS=failed
-    NOTES="last_successful_step=sparse_database_process_started; command_exit_code=${RUN_EXIT_CODE}; prunable_modules=${PRUNABLE_MODULES}; num_levels=${NUM_LEVELS}; metadata_present=${METADATA_PRESENT}; generated_module_dirs=${MODULE_DIRS}; generated_level_files=${LEVEL_FILES}; database_size_mb=${DATABASE_SIZE_MB}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}; last_progress=${LAST_PROGRESS}"
+    NOTES="last_successful_step=sparse_database_process_started; command_exit_code=${RUN_EXIT_CODE}; prunable_modules=${PRUNABLE_MODULES}; num_levels=${NUM_LEVELS}; drop_saved_file_cache=${DROP_SAVED_FILE_CACHE}; metadata_present=${METADATA_PRESENT}; generated_module_dirs=${MODULE_DIRS}; generated_level_files=${LEVEL_FILES}; database_size_mb=${DATABASE_SIZE_MB}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}; last_progress=${LAST_PROGRESS}"
     FINAL_EXIT_CODE="$RUN_EXIT_CODE"
 elif [[ "$METADATA_PRESENT" != "1" ]]; then
     STATUS=failed

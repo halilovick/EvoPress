@@ -8,6 +8,7 @@ import torch.distributed as dist
 from src import dist_utils
 from src.fast_obc import FastOBC
 from src.common_utils import to, maybe_first_element
+from src.io_utils import torch_save
 from src.model_utils import InputCollector, ForwardInterrupt, LINEAR_LAYERS, select_layers
 
 
@@ -26,6 +27,7 @@ class FastOBCPruner:
         device: Optional[torch.device] = None,
         cpu_offload_modules: bool = False,
         cpu_offload_activations: bool = False,
+        drop_saved_file_cache: bool = False,
         verbose: bool = False,
     ) -> None:
         self.model = model
@@ -39,6 +41,7 @@ class FastOBCPruner:
         self.device = device
         self.cpu_offload_modules = cpu_offload_modules
         self.cpu_offload_activations = cpu_offload_activations
+        self.drop_saved_file_cache = drop_saved_file_cache
         self.verbose = verbose
 
     @torch.no_grad()
@@ -170,7 +173,11 @@ class FastOBCPruner:
                 for level, sparse_weight in enumerate(sparse_weights, start=-min_level):
                     os.makedirs(os.path.join(self.save_dir, handle_name), exist_ok=True)
                     # Map tensor to CPU before saving
-                    torch.save(sparse_weight.cpu(), os.path.join(self.save_dir, handle_name, f"{level}.pth"))
+                    torch_save(
+                        sparse_weight.cpu(),
+                        os.path.join(self.save_dir, handle_name, f"{level}.pth"),
+                        drop_file_cache=self.drop_saved_file_cache,
+                    )
             if dist_utils.is_dist_available_and_initialized():
                 dist.barrier()
             handle.reset()

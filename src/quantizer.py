@@ -9,6 +9,7 @@ import torch.distributed as dist
 
 from src import dist_utils
 from src.common_utils import to, maybe_first_element
+from src.io_utils import torch_save
 from src.model_utils import InputCollector, ForwardInterrupt, LINEAR_LAYERS, select_layers
 from src.quant_utils import QLinear
 
@@ -29,6 +30,7 @@ class Quantizer:
         device: Optional[torch.device] = None,
         cpu_offload_modules: bool = False,
         cpu_offload_activations: bool = False,
+        drop_saved_file_cache: bool = False,
         verbose: bool = False,
     ) -> None:
         self.model = model
@@ -41,6 +43,7 @@ class Quantizer:
         self.device = device
         self.cpu_offload_modules = cpu_offload_modules
         self.cpu_offload_activations = cpu_offload_activations
+        self.drop_saved_file_cache = drop_saved_file_cache
         self.verbose = verbose
 
     @torch.no_grad()
@@ -165,7 +168,11 @@ class Quantizer:
                 dequantized_weight = qlayer.get_weight()
                 os.makedirs(os.path.join(self.save_dir, handle_name), exist_ok=True)
                 # Map tensor to CPU before save
-                torch.save(dequantized_weight.cpu(), os.path.join(self.save_dir, handle_name, f"{int(bits)}.pth"))
+                torch_save(
+                    dequantized_weight.cpu(),
+                    os.path.join(self.save_dir, handle_name, f"{int(bits)}.pth"),
+                    drop_file_cache=self.drop_saved_file_cache,
+                )
                 # Replace original layer by quantized layer with given bitwidth
                 if bits == calibration_bitwidth:
                     parent_name, child_name = handle_name.rsplit(".", 1)

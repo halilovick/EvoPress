@@ -40,6 +40,7 @@ VERBOSE="${VERBOSE:-1}"
 MEMORY_POLL_INTERVAL_SECONDS="${MEMORY_POLL_INTERVAL_SECONDS:-5}"
 DRY_RUN="${DRY_RUN:-0}"
 CHECK_RUNTIME_DEPENDENCIES="${CHECK_RUNTIME_DEPENDENCIES:-1}"
+DROP_SAVED_FILE_CACHE="${DROP_SAVED_FILE_CACHE:-1}"
 
 read -r -a BITS_LIST_ARGS <<< "$BITS_LIST"
 read -r -a PRE_BLOCK_MODULES_ARGS <<< "$PRE_BLOCK_MODULES"
@@ -140,6 +141,9 @@ if [[ "$CPU_OFFLOAD_ACTIVATIONS" == "1" ]]; then
 fi
 if [[ "$VERBOSE" == "1" ]]; then
     COMMAND+=(--verbose)
+fi
+if [[ "$DROP_SAVED_FILE_CACHE" == "1" ]]; then
+    COMMAND+=(--drop_saved_file_cache)
 fi
 
 directory_has_files() {
@@ -300,6 +304,7 @@ write_db_summary() {
         printf 'bitwidth_options=%s\n' "$BITS_LIST"
         printf 'calibration_bitwidth=%s\n' "$BITS_TO_LOAD"
         printf 'group_size=%s\n' "$GROUP_SIZE"
+        printf 'drop_saved_file_cache=%s\n' "$DROP_SAVED_FILE_CACHE"
         printf 'calibration_data=%s\n' "$CALIB_DATA"
         printf 'calibration_tokens=%s\n' "$CALIB_TOKENS"
         printf 'sequence_length=%s\n' "$SEQUENCE_LENGTH"
@@ -422,12 +427,12 @@ write_db_summary \
     "$LAST_PROGRESS"
 
 STATUS=completed
-NOTES="last_successful_step=quant_database_generated; quantizable_modules=${QUANTIZABLE_MODULES}; bitwidth_options=${BITS_LIST}; calibration_bitwidth=${BITS_TO_LOAD}; group_size=${GROUP_SIZE}; generated_module_dirs=${MODULE_DIRS}; generated_weight_files=${WEIGHT_FILES}; missing_expected_weight_files=${MISSING_WEIGHT_FILES}; database_size_mb=${DATABASE_SIZE_MB}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}; quant_db_dir=${QUANT_DB_DIR}"
+NOTES="last_successful_step=quant_database_generated; quantizable_modules=${QUANTIZABLE_MODULES}; bitwidth_options=${BITS_LIST}; calibration_bitwidth=${BITS_TO_LOAD}; group_size=${GROUP_SIZE}; drop_saved_file_cache=${DROP_SAVED_FILE_CACHE}; generated_module_dirs=${MODULE_DIRS}; generated_weight_files=${WEIGHT_FILES}; missing_expected_weight_files=${MISSING_WEIGHT_FILES}; database_size_mb=${DATABASE_SIZE_MB}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}; quant_db_dir=${QUANT_DB_DIR}"
 FINAL_EXIT_CODE=0
 
 if [[ "$RUN_EXIT_CODE" != "0" ]]; then
     STATUS=failed
-    NOTES="last_successful_step=quant_database_process_started; command_exit_code=${RUN_EXIT_CODE}; quantizable_modules=${QUANTIZABLE_MODULES}; bitwidth_options=${BITS_LIST}; generated_module_dirs=${MODULE_DIRS}; generated_weight_files=${WEIGHT_FILES}; missing_expected_weight_files=${MISSING_WEIGHT_FILES}; database_size_mb=${DATABASE_SIZE_MB}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}; last_progress=${LAST_PROGRESS}; quant_db_dir=${QUANT_DB_DIR}"
+    NOTES="last_successful_step=quant_database_process_started; command_exit_code=${RUN_EXIT_CODE}; quantizable_modules=${QUANTIZABLE_MODULES}; bitwidth_options=${BITS_LIST}; drop_saved_file_cache=${DROP_SAVED_FILE_CACHE}; generated_module_dirs=${MODULE_DIRS}; generated_weight_files=${WEIGHT_FILES}; missing_expected_weight_files=${MISSING_WEIGHT_FILES}; database_size_mb=${DATABASE_SIZE_MB}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}; last_progress=${LAST_PROGRESS}; quant_db_dir=${QUANT_DB_DIR}"
     FINAL_EXIT_CODE="$RUN_EXIT_CODE"
 elif [[ "${MODULE_DIRS:-0}" == "0" || "${WEIGHT_FILES:-0}" == "0" ]]; then
     STATUS=failed
