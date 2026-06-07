@@ -85,6 +85,22 @@ class RunJointSearchTinyTest(unittest.TestCase):
             self.assertIn("dropped_attn_modules=1", row["notes"])
             self.assertIn("dropped_mlp_modules=1", row["notes"])
 
+    def test_dry_run_supports_active_quant_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "outputs" / "joint"
+            result = self.run_command(
+                [str(LAUNCHER), "--dry-run"],
+                {
+                    "OUTPUT_DIR": str(output_dir),
+                    "ACTIVE_QUANT_BUDGET": "1",
+                    "GROUP_RULE": "size",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--group_rule size", result.stdout)
+            self.assertIn("--active_quant_budget", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

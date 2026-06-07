@@ -23,6 +23,7 @@ SURVIVORS_PER_SELECTION="${SURVIVORS_PER_SELECTION:-2 1}"
 TOKENS_PER_SELECTION="${TOKENS_PER_SELECTION:-512 2048}"
 FITNESS_FN="${FITNESS_FN:-kl}"
 GROUP_RULE="${GROUP_RULE:-none}"
+ACTIVE_QUANT_BUDGET="${ACTIVE_QUANT_BUDGET:-0}"
 STEP_SIZE="${STEP_SIZE:-1}"
 MAX_DROP_MUTATIONS="${MAX_DROP_MUTATIONS:-3}"
 DROP_ENTIRE_BLOCK="${DROP_ENTIRE_BLOCK:-0}"
@@ -48,7 +49,7 @@ usage() {
     cat <<'EOF'
 Usage: scripts/run_joint_search_tiny.sh [--dry-run]
 
-Run a logged TinyLlama joint depth-pruning and q-proj quantization search.
+Run a logged TinyLlama joint depth-pruning and quantization search.
 Override parameters with environment variables.
 
 Defaults:
@@ -58,6 +59,7 @@ Defaults:
   OFFSPRING=8
   CALIB_TOKENS=4096
   SEQUENCE_LENGTH=1024
+  ACTIVE_QUANT_BUDGET=0
 
 Examples:
   scripts/run_joint_search_tiny.sh --dry-run
@@ -127,6 +129,9 @@ if [[ "$DROP_ENTIRE_BLOCK" == "1" ]]; then
 fi
 if [[ "$USE_FAST_TOKENIZER" == "1" ]]; then
     COMMAND+=(--use_fast_tokenizer)
+fi
+if [[ "$ACTIVE_QUANT_BUDGET" == "1" ]]; then
+    COMMAND+=(--active_quant_budget)
 fi
 
 directory_has_files() {
@@ -333,6 +338,7 @@ START_TIME="$(date +%s)"
     printf 'quant_weights_path=%s\n' "$QUANT_WEIGHTS_PATH"
     printf 'drop_sparsity=%s\n' "$DROP_SPARSITY"
     printf 'target_bitwidth=%s\n' "$TARGET_BITWIDTH"
+    printf 'active_quant_budget=%s\n' "$ACTIVE_QUANT_BUDGET"
     printf 'started_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     printf 'command_file=%s\n' "$COMMAND_FILE"
     printf 'memory_samples_file=%s\n' "$MEMORY_SAMPLES_FILE"
@@ -389,7 +395,7 @@ MAX_CPU_MEMORY_GB="$(max_csv_column 2 "$MEMORY_SAMPLES_FILE")"
 MAX_GPU_MEMORY_GB="$(max_csv_column 3 "$MEMORY_SAMPLES_FILE")"
 
 STATUS=completed
-NOTES="last_successful_step=final_evaluation; quant_weights_path=${QUANT_WEIGHTS_PATH}; drop_sparsity=${DROP_SPARSITY}; target_bitwidth=${TARGET_BITWIDTH}; actual_average_bitwidth=${FINAL_QUANT_BIT_AVERAGE}; dropped_attn_modules=${DROPPED_ATTN_MODULES}; dropped_mlp_modules=${DROPPED_MLP_MODULES}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
+NOTES="last_successful_step=final_evaluation; quant_weights_path=${QUANT_WEIGHTS_PATH}; drop_sparsity=${DROP_SPARSITY}; target_bitwidth=${TARGET_BITWIDTH}; active_quant_budget=${ACTIVE_QUANT_BUDGET}; actual_average_bitwidth=${FINAL_QUANT_BIT_AVERAGE}; dropped_attn_modules=${DROPPED_ATTN_MODULES}; dropped_mlp_modules=${DROPPED_MLP_MODULES}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
 FINAL_EXIT_CODE=0
 
 if [[ "$RUN_EXIT_CODE" != "0" ]]; then

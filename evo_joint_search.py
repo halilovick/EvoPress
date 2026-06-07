@@ -4,6 +4,7 @@ import json
 import math
 import os
 import random
+import re
 from typing import List, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -221,12 +222,109 @@ def mutate_drop_state(drop_state, drop_entire_block: bool, max_mutations: int):
     return offspring
 
 
-def candidate_bits(model, grouped_layer_names, quant_state):
+LAYER_INDEX_RE = re.compile(r"\.layers\.(\d+)\.")
+
+
+def quant_layer_is_active(layer_name: str, drop_state) -> bool:
+    if drop_state is None:
+        return True
+
+    match = LAYER_INDEX_RE.search(layer_name)
+    if match is None:
+        return True
+
+    layer_id = int(match.group(1))
+    if ".self_attn." in layer_name:
+        return not drop_state["attn"][layer_id]
+    if ".mlp." in layer_name:
+        return not drop_state["mlp"][layer_id]
+    return True
+
+
+def candidate_bits(model, grouped_layer_names, quant_state, drop_state=None):
     total = 0
     for group_id, group in enumerate(grouped_layer_names):
         for i, layer_name in enumerate(group):
+            if not quant_layer_is_active(layer_name, drop_state):
+                continue
             total += model.get_submodule(layer_name).weight.numel() * quant_state[group_id][i]
     return total
+
+
+def quantizable_weights(model, grouped_layer_names, drop_state=None):
+    return sum(
+        model.get_submodule(layer_name).weight.numel()
+        for group in grouped_layer_names
+        for layer_name in group
+        if quant_layer_is_active(layer_name, drop_state)
+    )
+
+
+def repair_active_quant_budget(
+    grouped_layer_names,
+    quant_weights_path,
+    quant_state,
+    drop_state,
+    target_bitwidth: float,
+    step_size: int = 1,
+):
+    """Restore the target average independently within each equal-size group."""
+    repaired = copy.deepcopy(quant_state)
+
+    for group_id, group in enumerate(grouped_layer_names):
+        active_ids = [
+            i for i, layer_name in enumerate(group) if quant_layer_is_active(layer_name, drop_state)
+        ]
+        if not active_ids:
+            continue
+
+        target_level_sum = len(active_ids) * target_bitwidth
+        rounded_target = round(target_level_sum)
+        if not math.isclose(target_level_sum, rounded_target, abs_tol=1e-9):
+            raise ValueError(
+                "Active quantization budgeting requires a target bitwidth that "
+                "is exactly representable within every active size group."
+            )
+
+        current_level_sum = sum(repaired[group_id][i] for i in active_ids)
+
+        while current_level_sum < rounded_target:
+            candidates = [
+                i
+                for i in active_ids
+                if os.path.exists(
+                    os.path.join(
+                        quant_weights_path,
+                        group[i],
+                        f"{repaired[group_id][i] + step_size}.pth",
+                    )
+                )
+            ]
+            if not candidates:
+                raise RuntimeError("Unable to restore the active quantization bit budget.")
+            candidate_id = random.choice(candidates)
+            repaired[group_id][candidate_id] += step_size
+            current_level_sum += step_size
+
+        while current_level_sum > rounded_target:
+            candidates = [
+                i
+                for i in active_ids
+                if os.path.exists(
+                    os.path.join(
+                        quant_weights_path,
+                        group[i],
+                        f"{repaired[group_id][i] - step_size}.pth",
+                    )
+                )
+            ]
+            if not candidates:
+                raise RuntimeError("Unable to restore the active quantization bit budget.")
+            candidate_id = random.choice(candidates)
+            repaired[group_id][candidate_id] -= step_size
+            current_level_sum -= step_size
+
+    return repaired
 
 
 def make_initial_quant_state(model, grouped_layer_names, quant_weights_path, target_bitwidth: float):
@@ -274,7 +372,14 @@ def make_initial_quant_state(model, grouped_layer_names, quant_weights_path, tar
     return candidate
 
 
-def mutate_quant_state(model, grouped_layer_names, quant_weights_path, quant_state, step_size: int = 1):
+def mutate_quant_state(
+    model,
+    grouped_layer_names,
+    quant_weights_path,
+    quant_state,
+    step_size: int = 1,
+    drop_state=None,
+):
     """
     Simple budget-preserving mutation:
     within a randomly chosen group, decrease one layer's bitwidth and increase another's.
@@ -283,35 +388,32 @@ def mutate_quant_state(model, grouped_layer_names, quant_weights_path, quant_sta
     """
     offspring = copy.deepcopy(quant_state)
 
-    group_id = random.choices(range(len(grouped_layer_names)), weights=[len(g) for g in grouped_layer_names])[0]
-    group = grouped_layer_names[group_id]
+    valid_groups = []
+    for group_id, group in enumerate(grouped_layer_names):
+        decr_ids = []
+        incr_ids = []
+        for i, layer_name in enumerate(group):
+            if not quant_layer_is_active(layer_name, drop_state):
+                continue
 
-    decr_ids = []
-    incr_ids = []
+            level = offspring[group_id][i]
+            if os.path.exists(os.path.join(quant_weights_path, layer_name, f"{level - step_size}.pth")):
+                decr_ids.append(i)
+            if os.path.exists(os.path.join(quant_weights_path, layer_name, f"{level + step_size}.pth")):
+                incr_ids.append(i)
 
-    for i, layer_name in enumerate(group):
-        level = offspring[group_id][i]
+        valid_pairs = [(decr_id, incr_id) for decr_id in decr_ids for incr_id in incr_ids if decr_id != incr_id]
+        if valid_pairs:
+            valid_groups.append((group_id, valid_pairs))
 
-        if os.path.exists(os.path.join(quant_weights_path, layer_name, f"{level - step_size}.pth")):
-            decr_ids.append(i)
-
-        if os.path.exists(os.path.join(quant_weights_path, layer_name, f"{level + step_size}.pth")):
-            incr_ids.append(i)
-
-    if not decr_ids or not incr_ids:
+    if not valid_groups:
         return offspring
 
-    decr_id = random.choice(decr_ids)
-    incr_id = random.choice(incr_ids)
-
-    # Try to avoid changing the same layer in opposite directions.
-    tries = 0
-    while incr_id == decr_id and len(group) > 1 and tries < 10:
-        incr_id = random.choice(incr_ids)
-        tries += 1
-
-    if incr_id == decr_id:
-        return offspring
+    group_id, valid_pairs = random.choices(
+        valid_groups,
+        weights=[len(pairs) for _, pairs in valid_groups],
+    )[0]
+    decr_id, incr_id = random.choice(valid_pairs)
 
     offspring[group_id][decr_id] -= step_size
     offspring[group_id][incr_id] += step_size
@@ -342,6 +444,11 @@ def parse_args():
     parser.add_argument("--target_bitwidth", required=True, type=float)
     parser.add_argument("--group_rule", default="none", choices=["size", "name", "none"])
     parser.add_argument("--step_size", default=1, type=int)
+    parser.add_argument(
+        "--active_quant_budget",
+        action="store_true",
+        help="Keep the target bit average over projections still active after depth pruning.",
+    )
 
     parser.add_argument("--fitness_fn", default="kl", choices=["ppl", "kl"])
 
@@ -367,6 +474,8 @@ def main():
 
     assert len(args.survivors_per_selection) == len(args.tokens_per_selection)
     assert args.survivors_per_selection[-1] == 1
+    if args.active_quant_budget and args.group_rule != "size":
+        raise ValueError("--active_quant_budget requires --group_rule size.")
 
     fix_seed(args.seed)
 
@@ -446,11 +555,8 @@ def main():
 
     model.state = [[None] * len(names) for names in grouped_layer_names]
 
-    quantizable_weights = sum(
-        model.get_submodule(layer_name).weight.numel()
-        for group in grouped_layer_names
-        for layer_name in group
-    )
+    full_quantizable_weights = quantizable_weights(model, grouped_layer_names)
+    print(f"Quant budget scope: {'active' if args.active_quant_budget else 'all'}")
 
     # Initial joint population.
     initial_candidates = []
@@ -464,6 +570,15 @@ def main():
                 args.target_bitwidth,
             ),
         }
+        if args.active_quant_budget:
+            candidate["quant"] = repair_active_quant_budget(
+                grouped_layer_names,
+                args.quant_weights_path,
+                candidate["quant"],
+                candidate["drop"],
+                args.target_bitwidth,
+                args.step_size,
+            )
 
         if candidate in initial_candidates:
             continue
@@ -496,7 +611,17 @@ def main():
         print("Quant state:")
         for group in parent["quant"]:
             print(group)
-        print(f"Quant bit average: {candidate_bits(model, grouped_layer_names, parent['quant']) / quantizable_weights:.4e}")
+        budget_drop_state = parent["drop"] if args.active_quant_budget else None
+        budget_weights = quantizable_weights(model, grouped_layer_names, budget_drop_state)
+        print(
+            f"Quant bit average: "
+            f"{candidate_bits(model, grouped_layer_names, parent['quant'], budget_drop_state) / budget_weights:.4e}"
+        )
+        if args.active_quant_budget:
+            print(
+                f"Full quant bit average: "
+                f"{candidate_bits(model, grouped_layer_names, parent['quant']) / full_quantizable_weights:.4e}"
+            )
 
         apply_joint_state(model, layers, grouped_layer_names, parent, args.quant_weights_path)
 
@@ -519,6 +644,15 @@ def main():
                     args.drop_entire_block,
                     args.max_drop_mutations,
                 )
+                if args.active_quant_budget:
+                    offspring["quant"] = repair_active_quant_budget(
+                        grouped_layer_names,
+                        args.quant_weights_path,
+                        offspring["quant"],
+                        offspring["drop"],
+                        args.target_bitwidth,
+                        args.step_size,
+                    )
             else:
                 offspring["quant"] = mutate_quant_state(
                     model,
@@ -526,6 +660,7 @@ def main():
                     args.quant_weights_path,
                     offspring["quant"],
                     args.step_size,
+                    offspring["drop"] if args.active_quant_budget else None,
                 )
 
             if offspring in offspring_list or offspring == parent:
@@ -578,7 +713,17 @@ def main():
     print("Final quant state:")
     for group in parent["quant"]:
         print(group)
-    print(f"Final quant bit average: {candidate_bits(model, grouped_layer_names, parent['quant']) / quantizable_weights:.4e}")
+    budget_drop_state = parent["drop"] if args.active_quant_budget else None
+    budget_weights = quantizable_weights(model, grouped_layer_names, budget_drop_state)
+    print(
+        f"Final quant bit average: "
+        f"{candidate_bits(model, grouped_layer_names, parent['quant'], budget_drop_state) / budget_weights:.4e}"
+    )
+    if args.active_quant_budget:
+        print(
+            f"Final full quant bit average: "
+            f"{candidate_bits(model, grouped_layer_names, parent['quant']) / full_quantizable_weights:.4e}"
+        )
     print(f"Final dropped attention modules: {sum(parent['drop']['attn'])}")
     print(f"Final dropped MLP modules: {sum(parent['drop']['mlp'])}")
 
