@@ -141,6 +141,32 @@ def validate_consistency(summary: Mapping[str, Any], candidate: Mapping[str, Any
     quantization_statistics = summary["quantization_statistics"]
     model_size_statistics = summary["model_size_statistics"]
 
+    if summary.get("launcher_finalized_at"):
+        if final_metrics.get("runtime_source") != "launcher_wall_clock":
+            raise ValueError(
+                "Launcher-finalized summary must use launcher_wall_clock runtime."
+            )
+        if final_metrics.get("search_process_runtime_seconds") is None:
+            raise ValueError(
+                "Launcher-finalized summary is missing search_process_runtime_seconds."
+            )
+        if final_metrics.get("peak_process_rss_mb") is None:
+            raise ValueError(
+                "Launcher-finalized summary is missing peak_process_rss_mb."
+            )
+
+        cgroup_peak = final_metrics.get("peak_cpu_cgroup_memory_mb")
+        if cgroup_peak is not None and not math.isclose(
+            summary["final_metrics"]["peak_cpu_memory_mb"],
+            cgroup_peak,
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        ):
+            raise ValueError(
+                "final_metrics.peak_cpu_memory_mb does not match "
+                "peak_cpu_cgroup_memory_mb."
+            )
+
     active = parameter_statistics["active_parameters"]
     dense = parameter_statistics["total_parameters_dense"]
     if active > dense:

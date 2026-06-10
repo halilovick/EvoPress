@@ -29,6 +29,7 @@ RUN_ID="${RUN_ID:-depth_mistral7b_s${SPARSITY}_seed${SEED}}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUTS_ROOT}/${RUN_ID}}"
 DRY_RUN="${DRY_RUN:-0}"
 CHECK_RUNTIME_DEPENDENCIES="${CHECK_RUNTIME_DEPENDENCIES:-1}"
+MEMORY_POLL_INTERVAL_SECONDS="${MEMORY_POLL_INTERVAL_SECONDS:-5}"
 
 read -r -a SURVIVORS_PER_SELECTION_ARGS <<< "$SURVIVORS_PER_SELECTION"
 read -r -a TOKENS_PER_SELECTION_ARGS <<< "$TOKENS_PER_SELECTION"
@@ -70,6 +71,8 @@ RUNTIME_FILE="${OUTPUT_DIR}/runtime.txt"
 COMMAND_FILE="${OUTPUT_DIR}/command.sh"
 METRICS_FILE="${OUTPUT_DIR}/generation_metrics.csv"
 CONFIG_FILE="${OUTPUT_DIR}/layer_drop_config.txt"
+SUMMARY_FILE="${OUTPUT_DIR}/run_summary.json"
+MEMORY_SAMPLES_FILE="${OUTPUT_DIR}/memory_samples.csv"
 
 COMMAND=(
     "$PYTHON_BIN" "$EVO_DROP_SEARCH_SCRIPT"
@@ -134,6 +137,16 @@ get_gpu_vram_gb() {
     fi
 }
 
+get_gpu_used_gb() {
+    local memory_mib
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        memory_mib="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -n 1 || true)"
+        if [[ -n "$memory_mib" ]]; then
+            awk -v memory_mib="$memory_mib" 'BEGIN { printf "%.2f", memory_mib / 1024 }'
+        fi
+    fi
+}
+
 get_cpu_ram_limit_gb() {
     local memory_max
     if [[ -r /sys/fs/cgroup/memory.max ]]; then
@@ -142,6 +155,24 @@ get_cpu_ram_limit_gb() {
             awk -v memory_max="$memory_max" 'BEGIN { printf "%.2f", memory_max / 1024 / 1024 / 1024 }'
         fi
     fi
+}
+
+get_cpu_memory_current_gb() {
+    local memory_current
+    if [[ -r /sys/fs/cgroup/memory.current ]]; then
+        memory_current="$(cat /sys/fs/cgroup/memory.current)"
+        if [[ "$memory_current" =~ ^[0-9]+$ ]]; then
+            awk -v memory_current="$memory_current" 'BEGIN { printf "%.2f", memory_current / 1024 / 1024 / 1024 }'
+        fi
+    fi
+}
+
+monitor_memory() {
+    printf 'unix_time,cpu_memory_current_gb,gpu_memory_used_gb\n'
+    while true; do
+        printf '%s,%s,%s\n' "$(date +%s)" "$(get_cpu_memory_current_gb)" "$(get_gpu_used_gb)"
+        sleep "$MEMORY_POLL_INTERVAL_SECONDS"
+    done
 }
 
 extract_final_metrics() {
@@ -239,11 +270,18 @@ START_TIME="$(date +%s)"
     printf 'output_dir=%s\n' "$OUTPUT_DIR"
     printf 'started_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     printf 'command_file=%s\n' "$COMMAND_FILE"
+    printf 'memory_samples_file=%s\n' "$MEMORY_SAMPLES_FILE"
     printf '\n'
 } | tee "$RUN_LOG"
 
+monitor_memory > "$MEMORY_SAMPLES_FILE" &
+MONITOR_PID="$!"
+
 "${COMMAND[@]}" 2>&1 | tee -a "$RUN_LOG"
 RUN_EXIT_CODE="${PIPESTATUS[0]}"
+
+kill "$MONITOR_PID" >/dev/null 2>&1 || true
+wait "$MONITOR_PID" >/dev/null 2>&1 || true
 
 END_TIME="$(date +%s)"
 RUNTIME_SECONDS="$((END_TIME - START_TIME))"
@@ -253,6 +291,14 @@ RUNTIME_MINUTES="$(awk -v runtime_seconds="$RUNTIME_SECONDS" 'BEGIN { printf "%.
     printf 'runtime_minutes=%s\n' "$RUNTIME_MINUTES"
     printf 'exit_code=%s\n' "$RUN_EXIT_CODE"
 } > "$RUNTIME_FILE"
+
+SUMMARY_FINALIZE_EXIT_CODE=0
+if [[ -f "$SUMMARY_FILE" ]]; then
+    "$PYTHON_BIN" scripts/finalize_run_summary.py \
+        --summary "$SUMMARY_FILE" \
+        --runtime-file "$RUNTIME_FILE" \
+        --memory-samples "$MEMORY_SAMPLES_FILE" || SUMMARY_FINALIZE_EXIT_CODE="$?"
+fi
 
 PARSER_EXIT_CODE=0
 if [[ "$RUN_EXIT_CODE" == "0" ]]; then
@@ -294,6 +340,10 @@ if [[ "$RUN_EXIT_CODE" != "0" ]]; then
 elif [[ "$PARSER_EXIT_CODE" != "0" ]]; then
     STATUS=failed
     NOTES="last_successful_step=depth_search_process_completed; parser_exit_code=${PARSER_EXIT_CODE}"
+    FINAL_EXIT_CODE=1
+elif [[ "$SUMMARY_FINALIZE_EXIT_CODE" != "0" ]]; then
+    STATUS=failed
+    NOTES="last_successful_step=structured_summary_written; summary_finalize_exit_code=${SUMMARY_FINALIZE_EXIT_CODE}"
     FINAL_EXIT_CODE=1
 elif [[ ! -f "$CONFIG_FILE" ]]; then
     STATUS=failed

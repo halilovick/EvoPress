@@ -17,6 +17,7 @@ from src.run_reporting import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR = REPO_ROOT / "scripts" / "validate_run_outputs.py"
+FINALIZER = REPO_ROOT / "scripts" / "finalize_run_summary.py"
 
 
 class Attention(torch.nn.Module):
@@ -170,9 +171,69 @@ class RunReportingTest(unittest.TestCase):
                 },
             )
 
+            runtime_file = run_dir / "runtime.txt"
+            runtime_file.write_text(
+                "runtime_seconds=12\nruntime_minutes=0.20\nexit_code=0\n",
+                encoding="utf-8",
+            )
+            memory_samples = run_dir / "memory_samples.csv"
+            memory_samples.write_text(
+                "\n".join(
+                    [
+                        "unix_time,cpu_memory_current_gb,gpu_memory_used_gb",
+                        "1,1.25,2.00",
+                        "2,1.50,2.25",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            finalized = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(FINALIZER),
+                    "--summary",
+                    str(run_dir / "run_summary.json"),
+                    "--runtime-file",
+                    str(runtime_file),
+                    "--memory-samples",
+                    str(memory_samples),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(finalized.returncode, 0, finalized.stderr)
+            finalized_again = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(FINALIZER),
+                    "--summary",
+                    str(run_dir / "run_summary.json"),
+                    "--runtime-file",
+                    str(runtime_file),
+                    "--memory-samples",
+                    str(memory_samples),
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(finalized_again.returncode, 0, finalized_again.stderr)
+
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["final_metrics"]["active_parameters"], 240)
             self.assertEqual(summary["depth_statistics"]["dropped_attention_count"], 1)
+            self.assertEqual(summary["final_metrics"]["runtime_seconds"], 12.0)
+            self.assertEqual(summary["final_metrics"]["peak_cpu_memory_mb"], 1536.0)
+            self.assertEqual(summary["final_metrics"]["peak_gpu_device_used_mb"], 2304.0)
+            self.assertIn("peak_process_rss_mb", summary["final_metrics"])
+            self.assertNotEqual(
+                summary["final_metrics"]["search_process_runtime_seconds"],
+                summary["final_metrics"]["runtime_seconds"],
+            )
 
             result = subprocess.run(
                 [sys.executable, "-B", str(VALIDATOR), str(run_dir)],

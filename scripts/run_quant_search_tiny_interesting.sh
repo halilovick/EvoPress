@@ -88,6 +88,7 @@ COMMAND_FILE="${OUTPUT_DIR}/command.sh"
 METRICS_FILE="${OUTPUT_DIR}/generation_metrics.csv"
 FINAL_CONFIG_FILE="${OUTPUT_DIR}/quant_configuration.txt"
 MEMORY_SAMPLES_FILE="${OUTPUT_DIR}/memory_samples.csv"
+SUMMARY_FILE="${OUTPUT_DIR}/run_summary.json"
 
 COMMAND=(
     "$PYTHON_BIN" "$EVO_QUANT_SEARCH_SCRIPT"
@@ -365,6 +366,14 @@ RUNTIME_MINUTES="$(awk -v runtime_seconds="$RUNTIME_SECONDS" 'BEGIN { printf "%.
     printf 'exit_code=%s\n' "$RUN_EXIT_CODE"
 } > "$RUNTIME_FILE"
 
+SUMMARY_FINALIZE_EXIT_CODE=0
+if [[ -f "$SUMMARY_FILE" ]]; then
+    "$PYTHON_BIN" scripts/finalize_run_summary.py \
+        --summary "$SUMMARY_FILE" \
+        --runtime-file "$RUNTIME_FILE" \
+        --memory-samples "$MEMORY_SAMPLES_FILE" || SUMMARY_FINALIZE_EXIT_CODE="$?"
+fi
+
 PARSER_EXIT_CODE=0
 if [[ "$RUN_EXIT_CODE" == "0" ]]; then
     "$PYTHON_BIN" scripts/parse_quant_search_log.py \
@@ -413,6 +422,10 @@ if [[ "$RUN_EXIT_CODE" != "0" ]]; then
 elif [[ "$PARSER_EXIT_CODE" != "0" ]]; then
     STATUS=failed
     NOTES="last_successful_step=quant_search_process_completed; parser_exit_code=${PARSER_EXIT_CODE}; quant_weights_path=${QUANT_WEIGHTS_PATH}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
+    FINAL_EXIT_CODE=1
+elif [[ "$SUMMARY_FINALIZE_EXIT_CODE" != "0" ]]; then
+    STATUS=failed
+    NOTES="last_successful_step=structured_summary_written; summary_finalize_exit_code=${SUMMARY_FINALIZE_EXIT_CODE}; quant_weights_path=${QUANT_WEIGHTS_PATH}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
     FINAL_EXIT_CODE=1
 elif [[ ! -f "$FINAL_CONFIG_FILE" ]]; then
     STATUS=failed
