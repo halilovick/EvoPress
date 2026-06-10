@@ -84,6 +84,7 @@ class RunReportingTest(unittest.TestCase):
         self.assertEqual(quant["active_quantized_module_count"], 1)
         self.assertEqual(quant["bitwidth_histogram"], {"4": 1})
         self.assertEqual(quant["average_bitwidth_active"], 4.0)
+        self.assertAlmostEqual(quant["average_bitwidth_total"], 3648 / 272)
         self.assertAlmostEqual(size["estimated_weight_memory_mb"] * 1024**2 * 8, 3648.0)
         self.assertGreater(size["estimated_compression_ratio"], 1.0)
 

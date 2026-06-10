@@ -66,8 +66,9 @@ METRIC_DEFINITIONS = {
         "inside modules later bypassed by depth pruning."
     ),
     "average_bitwidth_total": (
-        "Theoretical effective bits divided by active total-model parameters. "
-        "Active non-searched parameters use the dense dtype bitwidth."
+        "Theoretical effective bits divided by dense-model parameters. Dropped "
+        "parameters contribute zero bits and active non-searched parameters use "
+        "the dense dtype bitwidth."
     ),
     "estimated_compression_ratio": (
         "Dense theoretical weight memory divided by estimated compressed weight memory."
@@ -307,7 +308,7 @@ def compute_compression_metrics(
         else None
     )
     average_bitwidth_total = (
-        total_effective_bits / active_parameters if active_parameters else None
+        total_effective_bits / total_parameters if total_parameters else None
     )
 
     dense_weight_memory_mb = total_parameters * dense_dtype_bits / 8 / 1024**2
@@ -525,7 +526,7 @@ class RunReporter:
         merged_final_metrics.update(final_metrics)
 
         summary = {
-            "schema_version": 1,
+            "schema_version": 2,
             "run_name": self.run_name,
             "timestamp_start": self.timestamp_start,
             "timestamp_end": utc_now(),

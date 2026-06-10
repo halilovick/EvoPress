@@ -102,7 +102,7 @@ def reject_nonfinite_numbers(value: Any, path: str = "root") -> None:
             reject_nonfinite_numbers(item, f"{path}[{index}]")
 
 
-def validate_generation_log(path: Path) -> int:
+def validate_generation_log(path: Path, schema_version: int) -> int:
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         if reader.fieldnames is None:
@@ -112,13 +112,14 @@ def validate_generation_log(path: Path) -> int:
             "best_search_fitness",
             "fitness_fn",
             "eval_tokens_used",
-            "eval_tokens_by_dataset",
             "active_parameters",
             "estimated_weight_memory_mb",
             "dropped_attention_count",
             "dropped_mlp_count",
             "runtime_seconds_cumulative",
         }
+        if schema_version >= 2:
+            required_columns.add("eval_tokens_by_dataset")
         missing = sorted(required_columns.difference(reader.fieldnames))
         if missing:
             raise ValueError(
@@ -173,6 +174,22 @@ def validate_consistency(summary: Mapping[str, Any], candidate: Mapping[str, Any
     if not math.isclose(ratio, expected_ratio, rel_tol=1e-9, abs_tol=1e-9):
         raise ValueError("Estimated compression ratio does not match the documented formula.")
 
+    if summary["schema_version"] >= 2:
+        expected_total_average = (
+            estimated_memory
+            / dense_memory
+            * model_size_statistics["dense_dtype_bits"]
+        )
+        if not math.isclose(
+            quantization_statistics["average_bitwidth_total"],
+            expected_total_average,
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        ):
+            raise ValueError(
+                "average_bitwidth_total does not treat dropped parameters as zero-bit."
+            )
+
     is_compressed = (
         depth_statistics["dropped_total_count"] > 0
         or (
@@ -197,7 +214,10 @@ def validate_run_dir(run_dir: Path) -> int:
     reject_nonfinite_numbers(summary, "run_summary")
     reject_nonfinite_numbers(candidate, "final_candidate")
 
-    generation_count = validate_generation_log(run_dir / "generation_log.csv")
+    generation_count = validate_generation_log(
+        run_dir / "generation_log.csv",
+        int(summary["schema_version"]),
+    )
     validate_consistency(summary, candidate)
     return generation_count
 
