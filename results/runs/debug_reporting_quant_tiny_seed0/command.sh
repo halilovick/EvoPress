@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd /home/jovyan/evopress
+exec python evo_quant_search.py --model_name_or_path TinyLlama/TinyLlama-1.1B-Chat-v1.0 --quant_weights_path outputs/experiments/quant_db_tinyllama_qproj_bits234/quant_db/TinyLlama-1.1B-Chat-v1.0/3bit --target_bitwidth 3.0 --calibration_data wikitext2 --calibration_tokens 1024 --calibration_sequence_length 512 --eval_every 1 --eval_datasets wikitext2 --eval_tokens 4096 --eval_sequence_length 512 --generations 2 --offspring 2 --initially_generated 2 --initial_tokens 128 --survivors_per_selection 2 1 --tokens_per_selection 128 512 --fitness_fn kl --group_rule none --step_size 1 --dtype float16 --attn_implementation sdpa --seed 0 --configuration_name debug_reporting_quant_tiny_seed0_final_configuration.txt --output_dir outputs/experiments/debug_reporting_quant_tiny_seed0 --use_fast_tokenizer 

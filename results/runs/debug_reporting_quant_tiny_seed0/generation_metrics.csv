@@ -1,0 +1,4 @@
+run_id,phase,generation,train_fitness,selection_train_fitness,wikitext2_ppl,train_ppl,bit_average,parent_bits,search_point
+debug_reporting_quant_tiny_seed0,generation,1,8.6823e-03,6.19e-03,10.66,14.41,3.0000e+00,276824064,"[[3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3]]"
+debug_reporting_quant_tiny_seed0,generation,2,6.1913e-03,6.19e-03,10.66,14.41,3.0000e+00,276824064,"[[3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3]]"
+debug_reporting_quant_tiny_seed0,final,,,,10.66,14.41,,,"[[3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3]]"
