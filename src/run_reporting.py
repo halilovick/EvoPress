@@ -29,6 +29,7 @@ GENERATION_COLUMNS = [
     "c4_ppl",
     "fineweb_edu_ppl",
     "eval_tokens_used",
+    "eval_tokens_by_dataset",
     "num_offspring",
     "num_survivors_stage_1",
     "num_survivors_stage_2",
@@ -460,6 +461,9 @@ class RunReporter:
         )
         normalized["tokens_per_selection"] = json.dumps(
             normalized["tokens_per_selection"], separators=(",", ":")
+        )
+        normalized["eval_tokens_by_dataset"] = json.dumps(
+            normalized["eval_tokens_by_dataset"], separators=(",", ":")
         )
         normalized["mutation_summary"] = json.dumps(
             normalized["mutation_summary"], separators=(",", ":")

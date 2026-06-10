@@ -314,6 +314,10 @@ def main():
                 train=False,
             )
         )
+    eval_tokens_by_dataset = {
+        name: sum(sample.numel() for sample in dataset)
+        for name, dataset in zip(args.eval_datasets, eval_datasets)
+    }
     target_logits = []
     if args.fitness_fn == "kl":
         # Compute target logits (calibration)
@@ -587,7 +591,14 @@ def main():
                 "wikitext2_ppl": generation_eval_metrics.get("wikitext2"),
                 "c4_ppl": generation_eval_metrics.get("c4"),
                 "fineweb_edu_ppl": generation_eval_metrics.get("fineweb_edu"),
-                "eval_tokens_used": args.eval_tokens if generation_eval_metrics else 0,
+                "eval_tokens_used": (
+                    sum(eval_tokens_by_dataset[name] for name in generation_eval_metrics)
+                    if generation_eval_metrics
+                    else 0
+                ),
+                "eval_tokens_by_dataset": {
+                    name: eval_tokens_by_dataset[name] for name in generation_eval_metrics
+                },
                 "num_offspring": args.offspring,
                 "num_survivors_stage_1": survivors[0] if len(survivors) > 0 else None,
                 "num_survivors_stage_2": survivors[1] if len(survivors) > 1 else None,
@@ -676,6 +687,7 @@ def main():
             "sequence_length": args.calibration_sequence_length,
             "calibration_tokens": args.calibration_tokens,
             "eval_tokens": args.eval_tokens,
+            "eval_tokens_loaded_by_dataset": eval_tokens_by_dataset,
             "eval_every": args.eval_every,
             "seed": args.seed,
         },

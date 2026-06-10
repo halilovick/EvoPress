@@ -101,6 +101,7 @@ class RunReportingTest(unittest.TestCase):
                     "c4_ppl": None,
                     "fineweb_edu_ppl": None,
                     "eval_tokens_used": 1024,
+                    "eval_tokens_by_dataset": {"wikitext2": 1024},
                     "num_offspring": 2,
                     "num_survivors_stage_1": 1,
                     "num_survivors_stage_2": None,

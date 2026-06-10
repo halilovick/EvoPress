@@ -111,6 +111,8 @@ def validate_generation_log(path: Path) -> int:
             "generation",
             "best_search_fitness",
             "fitness_fn",
+            "eval_tokens_used",
+            "eval_tokens_by_dataset",
             "active_parameters",
             "estimated_weight_memory_mb",
             "dropped_attention_count",
