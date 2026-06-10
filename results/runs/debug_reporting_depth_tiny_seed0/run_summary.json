@@ -1,0 +1,138 @@
+{
+  "artifacts": {
+    "candidate_path": "outputs/experiments/debug_reporting_depth_tiny_seed0/final_candidate.json",
+    "config_path": "outputs/experiments/debug_reporting_depth_tiny_seed0/layer_drop_config.txt",
+    "generation_log_path": "outputs/experiments/debug_reporting_depth_tiny_seed0/generation_log.csv",
+    "stdout_log_path": "outputs/experiments/debug_reporting_depth_tiny_seed0/run.log"
+  },
+  "compression_config": {
+    "bits_available": [],
+    "drop_entire_block": false,
+    "drop_two_consecutive": false,
+    "group_size": null,
+    "target_average_bitwidth": null,
+    "target_depth_sparsity": 0.125
+  },
+  "dataset_calibration": "wikitext2",
+  "dataset_eval": [
+    "wikitext2"
+  ],
+  "depth_statistics": {
+    "dropped_attention_count": 2,
+    "dropped_attention_layers": [
+      12,
+      19
+    ],
+    "dropped_attention_modules": [
+      "model.layers.12.self_attn",
+      "model.layers.19.self_attn"
+    ],
+    "dropped_mlp_count": 2,
+    "dropped_mlp_layers": [
+      11,
+      15
+    ],
+    "dropped_mlp_modules": [
+      "model.layers.11.mlp",
+      "model.layers.15.mlp"
+    ],
+    "dropped_modules": [
+      "model.layers.12.self_attn",
+      "model.layers.19.self_attn",
+      "model.layers.11.mlp",
+      "model.layers.15.mlp"
+    ],
+    "dropped_total_count": 4,
+    "num_attention_modules": 22,
+    "num_layers": 22,
+    "num_mlp_modules": 22
+  },
+  "final_metrics": {
+    "active_parameter_ratio": 0.9199304455321121,
+    "active_parameters": 1011968000,
+    "average_bitwidth_active": null,
+    "average_bitwidth_searched": null,
+    "average_bitwidth_total": 16.0,
+    "best_search_fitness": 0.333251953125,
+    "c4_ppl": null,
+    "dense_weight_memory_mb": 2098.17578125,
+    "estimated_compression_ratio": 1.087038704781179,
+    "estimated_weight_memory_mb": 1930.17578125,
+    "final_calibration_kl": 0.311279296875,
+    "fineweb_ppl": null,
+    "peak_cpu_memory_mb": 3704.08203125,
+    "peak_gpu_memory_mb": 2330.3056640625,
+    "peak_gpu_reserved_mb": 2462.0,
+    "runtime_seconds": 165.34283412247896,
+    "total_parameters_dense": 1100048384,
+    "train_ppl": 18.65625,
+    "wikitext2_ppl": 14.46875
+  },
+  "git_commit": "a2d1982847e6dc6a98f06b338f5d6fccb87072f5",
+  "metric_definitions": {
+    "active_parameters": "Theoretical parameters used by inference. Parameters in bypassed attention/MLP modules are excluded even though their tensors remain allocated.",
+    "average_bitwidth_active": "Parameter-weighted average over active searched weights only.",
+    "average_bitwidth_searched": "Parameter-weighted average over all searched weights, including assignments inside modules later bypassed by depth pruning.",
+    "average_bitwidth_total": "Theoretical effective bits divided by active total-model parameters. Active non-searched parameters use the dense dtype bitwidth.",
+    "estimated_compression_ratio": "Dense theoretical weight memory divided by estimated compressed weight memory.",
+    "peak_cpu_memory_mb": "Peak resident set size reported by the operating system for this process.",
+    "peak_gpu_memory_mb": "Peak tensor memory allocated by PyTorch in this process."
+  },
+  "model_name": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+  "model_size_statistics": {
+    "dense_dtype_bits": 16,
+    "dense_weight_memory_mb": 2098.17578125,
+    "estimated_compression_ratio": 1.087038704781179,
+    "estimated_weight_memory_mb": 1930.17578125,
+    "model_size_note": "The estimated model size is theoretical and based on assigned bitwidths. It does not represent the on-disk size of the current floating-point reconstruction database.",
+    "nonsearched_weight_memory_mb": 1930.17578125,
+    "searched_weight_memory_mb": 0.0
+  },
+  "parameter_statistics": {
+    "active_nonsearched_parameters": 1011968000,
+    "active_parameter_ratio": 0.9199304455321121,
+    "active_parameters": 1011968000,
+    "active_parameters_note": "Theoretical parameters used by inference. Parameters in bypassed attention/MLP modules are excluded even though their tensors remain allocated.",
+    "dropped_parameters": 88080384,
+    "nonsearched_parameters": 1100048384,
+    "searched_parameters_active": 0,
+    "searched_parameters_dense": 0,
+    "total_parameters_dense": 1100048384
+  },
+  "quantization_statistics": {
+    "active_quantized_module_count": 0,
+    "average_bitwidth_active": null,
+    "average_bitwidth_by_projection_type": {},
+    "average_bitwidth_searched": null,
+    "average_bitwidth_total": 16.0,
+    "bitwidth_by_module": {},
+    "bitwidth_histogram": {},
+    "bitwidth_parameter_histogram": {},
+    "quantized_module_count": 0
+  },
+  "run_name": "debug_reporting_depth_tiny_seed0",
+  "schema_version": 1,
+  "search_config": {
+    "calibration_tokens": 1024,
+    "eval_every": 1,
+    "eval_tokens": 524288,
+    "fitness_fn": "kl",
+    "generations": 2,
+    "initial_candidates": 2,
+    "initial_tokens": 128,
+    "offspring": 2,
+    "seed": 0,
+    "selection_survivors": [
+      2,
+      1
+    ],
+    "selection_tokens": [
+      128,
+      512
+    ],
+    "sequence_length": 512
+  },
+  "search_type": "depth_only",
+  "timestamp_end": "2026-06-10T14:42:57Z",
+  "timestamp_start": "2026-06-10T14:40:12Z"
+}
