@@ -114,6 +114,7 @@ COMMAND=(
     --attn_implementation "$ATTN_IMPLEMENTATION"
     --seed "$SEED"
     --configuration_name "$CONFIGURATION_NAME"
+    --output_dir "$OUTPUT_DIR"
 )
 
 if [[ "$USE_FAST_TOKENIZER" == "1" ]]; then

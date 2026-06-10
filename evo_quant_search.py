@@ -20,7 +20,23 @@ except ModuleNotFoundError:
 from src.data_utils import get_data
 from src.common_utils import fix_seed
 from src.metrics import compute_perplexity, compute_kl_div, compute_sparse_kl_div
-from src.model_utils import layer_order_fn, group_layers
+from src.model_utils import (
+    get_attn_layer_name,
+    get_layers,
+    get_mlp_layer_name,
+    group_layers,
+    layer_order_fn,
+)
+from src.run_reporting import (
+    RunReporter,
+    available_bitwidths,
+    build_depth_details,
+    build_final_candidate,
+    compute_compression_metrics,
+    flatten_quant_state,
+    module_name,
+    peak_gpu_memory,
+)
 
 
 def load_layers(
@@ -218,12 +234,23 @@ def parse_args():
         default=None,
         help="Filename for the final quantization configuration. Defaults to the legacy generated name.",
     )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Directory for structured run_summary.json, generation_log.csv, and final_candidate.json.",
+    )
     args = parser.parse_args()
     return args
 
 
 def main():
     args = parse_args()
+    reporter = RunReporter(
+        args.output_dir,
+        search_type="quant_only",
+        repo_root=os.path.dirname(os.path.abspath(__file__)),
+    )
     # Sanity checks
     assert len(args.survivors_per_selection) == len(args.tokens_per_selection), "Must have same number of stages"
     assert args.survivors_per_selection[-1] == 1, "Last stage should have only one survivor"
@@ -249,6 +276,20 @@ def main():
         attn_implementation=args.attn_implementation,
     )
     model.config.use_cache = False  # do not use cache
+    transformer_layers = get_layers(model)
+    attention_module_names = [
+        module_name(model, getattr(layer, get_attn_layer_name(model)))
+        for layer in transformer_layers
+    ]
+    mlp_module_names = [
+        module_name(model, getattr(layer, get_mlp_layer_name(model)))
+        for layer in transformer_layers
+    ]
+    no_depth_details = build_depth_details(
+        attention_module_names,
+        mlp_module_names,
+        None,
+    )
     # Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
         args.tokenizer_name or args.model_name_or_path, use_fast=args.use_fast_tokenizer
@@ -314,7 +355,19 @@ def main():
         int(args.target_bitwidth) == args.target_bitwidth
     ):  # TODO: What if target bitwidth is integer, but not available (e.g. 4/8 with 5bit average)
         parent = [[int(args.target_bitwidth) for _ in names] for names in grouped_layer_names]
-        train_fitness = float("inf")
+        initial_population, train_fitnesses = selection(
+            model=model,
+            grouped_layer_names=grouped_layer_names,
+            quant_weights_path=args.quant_weights_path,
+            candidates=[parent],
+            num_survive=1,
+            calibration_data=calibration_data,
+            num_tokens=args.initial_tokens or args.tokens_per_selection[0],
+            fitness_fn=args.fitness_fn,
+            target_logits=target_logits,
+        )
+        parent = initial_population[0]
+        train_fitness = train_fitnesses[0]
     else:
         candidates = []
         for _ in range(args.initially_generated):
@@ -362,6 +415,8 @@ def main():
 
     log_dict = {}
     for generation in range(args.generations):
+        generation_parent = copy.deepcopy(parent)
+        generation_train_fitness = train_fitness
         parent_bits = 0
         for group_id in range(len(grouped_layer_names)):
             for i, layer_name in enumerate(grouped_layer_names[group_id]):
@@ -378,11 +433,14 @@ def main():
         load_layers(model, grouped_layer_names, parent, args.quant_weights_path)
 
         # Evaluate current search point
+        generation_eval_metrics = {}
+        ppl_train = None
         if generation % args.eval_every == 0:
             for eval_dataset_name, eval_dataset in zip(args.eval_datasets, eval_datasets):
                 ppl_eval = compute_perplexity(model, eval_dataset)
                 print(f"{eval_dataset_name}: {ppl_eval:.2f}")
                 log_dict[f"ppl_eval/{eval_dataset_name}"] = ppl_eval
+                generation_eval_metrics[eval_dataset_name] = ppl_eval
             ppl_train = compute_perplexity(model, calibration_data)
             print(f"ppl_train: {ppl_train:.2f}")
             log_dict["ppl_train"] = ppl_train
@@ -508,6 +566,56 @@ def main():
         parent = offspring_list[0]
         print(f"Train fitnesses: {train_fitness:.2e}")
         log_dict["train_fitness"] = train_fitness
+
+        generation_bitwidths = flatten_quant_state(
+            grouped_layer_names,
+            generation_parent,
+        )
+        generation_compression = compute_compression_metrics(
+            model,
+            no_depth_details,
+            generation_bitwidths,
+        )
+        survivors = list(args.survivors_per_selection)
+        reporter.append_generation(
+            {
+                "generation": generation + 1,
+                "best_search_fitness": generation_train_fitness,
+                "fitness_fn": args.fitness_fn,
+                "best_calibration_kl": None,
+                "best_train_ppl": ppl_train,
+                "wikitext2_ppl": generation_eval_metrics.get("wikitext2"),
+                "c4_ppl": generation_eval_metrics.get("c4"),
+                "fineweb_edu_ppl": generation_eval_metrics.get("fineweb_edu"),
+                "eval_tokens_used": args.eval_tokens if generation_eval_metrics else 0,
+                "num_offspring": args.offspring,
+                "num_survivors_stage_1": survivors[0] if len(survivors) > 0 else None,
+                "num_survivors_stage_2": survivors[1] if len(survivors) > 1 else None,
+                "num_survivors_stage_3": survivors[2] if len(survivors) > 2 else None,
+                "survivors_per_selection": survivors,
+                "tokens_per_selection": list(args.tokens_per_selection),
+                "active_parameters": generation_compression["parameter_statistics"][
+                    "active_parameters"
+                ],
+                "average_bitwidth_active": generation_compression["quantization_statistics"][
+                    "average_bitwidth_active"
+                ],
+                "estimated_weight_memory_mb": generation_compression["model_size_statistics"][
+                    "estimated_weight_memory_mb"
+                ],
+                "dropped_attention_count": 0,
+                "dropped_mlp_count": 0,
+                "mutation_summary": {
+                    "type": "quantization_level_switch",
+                    "offspring_generated": args.offspring,
+                    "step_size": args.step_size,
+                    "group_rule": args.group_rule,
+                },
+                "accepted_parent_replacement": parent != generation_parent,
+                "runtime_seconds_cumulative": reporter.runtime_seconds(),
+                "peak_gpu_memory_mb": peak_gpu_memory()[0],
+            }
+        )
     # Save final configuration
     configuration_name = args.configuration_name or f"evo-{args.fitness_fn}-configuration-{args.target_bitwidth}.txt"
     with open(os.path.join(args.quant_weights_path, configuration_name), "w") as f:
@@ -523,15 +631,89 @@ def main():
         print(group)
     # Final evaluation
     load_layers(model, grouped_layer_names, parent, args.quant_weights_path)
+    final_eval_metrics = {}
     for eval_dataset_name, eval_dataset in zip(args.eval_datasets, eval_datasets):
         ppl_eval = compute_perplexity(model, eval_dataset)
         print(f"{eval_dataset_name}: {ppl_eval:.2f}")
         log_dict[f"ppl_eval/{eval_dataset_name}"] = ppl_eval
+        final_eval_metrics[eval_dataset_name] = ppl_eval
     ppl_train = compute_perplexity(model, calibration_data)
     print(f"ppl_train: {ppl_train:.2f}")
     log_dict["ppl_train"] = ppl_train
     if args.log_wandb:
         wandb.log(log_dict)
+
+    final_calibration_kl = None
+    if args.fitness_fn == "kl":
+        final_calibration_kl = compute_kl_div(model, calibration_data, target_logits)
+
+    final_bitwidths = flatten_quant_state(grouped_layer_names, parent)
+    final_compression = compute_compression_metrics(
+        model,
+        no_depth_details,
+        final_bitwidths,
+    )
+    final_candidate = build_final_candidate(
+        "quant_only",
+        no_depth_details,
+        final_bitwidths,
+        parent,
+    )
+    final_candidate_path = reporter.write_final_candidate(final_candidate)
+    output_dir = args.output_dir
+    reporter.write_summary(
+        model_name=args.model_name_or_path,
+        dataset_calibration=args.calibration_data,
+        dataset_eval=args.eval_datasets,
+        search_config={
+            "generations": args.generations,
+            "offspring": args.offspring,
+            "initial_candidates": args.initially_generated,
+            "initial_tokens": args.initial_tokens,
+            "selection_tokens": list(args.tokens_per_selection),
+            "selection_survivors": list(args.survivors_per_selection),
+            "fitness_fn": args.fitness_fn,
+            "sequence_length": args.calibration_sequence_length,
+            "calibration_tokens": args.calibration_tokens,
+            "eval_tokens": args.eval_tokens,
+            "eval_every": args.eval_every,
+            "seed": args.seed,
+        },
+        compression_config={
+            "target_depth_sparsity": 0.0,
+            "target_average_bitwidth": args.target_bitwidth,
+            "bits_available": available_bitwidths(args.quant_weights_path),
+            "group_size": None,
+            "group_rule": args.group_rule,
+            "quant_weights_path": args.quant_weights_path,
+        },
+        final_metrics={
+            "best_search_fitness": train_fitness,
+            "final_calibration_kl": final_calibration_kl,
+            "wikitext2_ppl": final_eval_metrics.get("wikitext2"),
+            "c4_ppl": final_eval_metrics.get("c4"),
+            "fineweb_ppl": final_eval_metrics.get("fineweb_edu"),
+            "train_ppl": ppl_train,
+        },
+        parameter_statistics=final_compression["parameter_statistics"],
+        depth_statistics={
+            key: value
+            for key, value in no_depth_details.items()
+            if key not in {"kept_modules", "attention_mask", "mlp_mask"}
+        },
+        quantization_statistics=final_compression["quantization_statistics"],
+        model_size_statistics=final_compression["model_size_statistics"],
+        artifacts={
+            "candidate_path": final_candidate_path,
+            "generation_log_path": (
+                os.path.join(output_dir, "generation_log.csv") if output_dir else None
+            ),
+            "config_path": (
+                os.path.join(output_dir, "quant_configuration.txt") if output_dir else configuration_name
+            ),
+            "stdout_log_path": os.path.join(output_dir, "run.log") if output_dir else None,
+        },
+    )
 
 
 if __name__ == "__main__":

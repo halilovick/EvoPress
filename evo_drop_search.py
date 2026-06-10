@@ -51,6 +51,14 @@ from src.model_utils import (
     restore_forward,
 )
 from src.metrics import compute_perplexity, compute_kl_div
+from src.run_reporting import (
+    RunReporter,
+    build_depth_details,
+    build_final_candidate,
+    compute_compression_metrics,
+    module_name,
+    peak_gpu_memory,
+)
 
 
 def get_layer_drop_config(removed_state) -> List[str]:
@@ -116,6 +124,14 @@ def load_states(model, layers, removed_state, drop_two_consecutive):
                 make_dummy_forward(subblock, subblock_type)
             else:
                 restore_forward(subblock)
+
+
+def expand_removed_state(removed_state, drop_two_consecutive):
+    expanded = copy.deepcopy(removed_state)
+    if drop_two_consecutive:
+        expanded["attn"] = [expanded["attn"][i // 2] for i in range(2 * len(expanded["attn"]))]
+        expanded["mlp"] = [expanded["mlp"][i // 2] for i in range(2 * len(expanded["mlp"]))]
+    return expanded
 
 
 def compute_fitness(model, data, fitness_fn, invert_fitness, target_logits: Optional[torch.Tensor] = None) -> float:
@@ -289,6 +305,12 @@ def parse_args():
 
 def main():
     args = parse_args()
+    report_dir = args.drop_config_dir or args.save_dir
+    reporter = RunReporter(
+        report_dir,
+        search_type="depth_only",
+        repo_root=os.path.dirname(os.path.abspath(__file__)),
+    )
     # Sanity checks
     assert len(args.survivors_per_selection) == len(
         args.tokens_per_selection
@@ -357,6 +379,12 @@ def main():
                 target_logits.append(model(calibration_data[i].to(device)).logits.cpu())
 
     layers = get_layers(model)
+    attention_module_names = [
+        module_name(model, getattr(layer, get_attn_layer_name(model))) for layer in layers
+    ]
+    mlp_module_names = [
+        module_name(model, getattr(layer, get_mlp_layer_name(model))) for layer in layers
+    ]
     blocks_to_remove = int(args.sparsity * len(layers))
     print(f"Removing {blocks_to_remove} blocks")
     total_blocks = len(layers)
@@ -417,6 +445,8 @@ def main():
     log_dict = {}
 
     for gen_id in range(args.generations):
+        generation_parent = copy.deepcopy(population[0])
+        generation_train_fitness = train_fitnesses[0]
         print(f"Generation {gen_id + 1}/{args.generations}")
         print(f"Train fitness {train_fitnesses[0]:.2e}")
 
@@ -425,12 +455,15 @@ def main():
 
         load_states(model, layers, population[0], args.drop_two_consecutive)
         log_dict["train_fitness"] = train_fitnesses[0]
+        generation_eval_metrics = {}
+        full_train_ppl = None
         # Evaluate current search point
         if gen_id % args.eval_every == 0 and not args.no_eval:
             for eval_dataset_name, eval_dataset in zip(args.eval_datasets, eval_datasets):
                 ppl_eval = compute_perplexity(model, eval_dataset)
                 print(f"{eval_dataset_name}: {ppl_eval:.2f}")
                 log_dict[f"ppl_eval/{eval_dataset_name}"] = ppl_eval
+                generation_eval_metrics[eval_dataset_name] = ppl_eval
 
             full_train_ppl = compute_perplexity(model, calibration_data)
             print(f"full train ppl: {full_train_ppl:.2e}")
@@ -515,6 +548,60 @@ def main():
                 for line in layer_drop_config:
                     f.write(line + "\n")
 
+        generation_depth_details = build_depth_details(
+            attention_module_names,
+            mlp_module_names,
+            expand_removed_state(generation_parent, args.drop_two_consecutive),
+        )
+        generation_compression = compute_compression_metrics(
+            model,
+            generation_depth_details,
+        )
+        survivors = list(args.survivors_per_selection)
+        reporter.append_generation(
+            {
+                "generation": gen_id + 1,
+                "best_search_fitness": generation_train_fitness,
+                "fitness_fn": args.fitness_fn,
+                "best_calibration_kl": None,
+                "best_train_ppl": full_train_ppl,
+                "wikitext2_ppl": generation_eval_metrics.get("wikitext2"),
+                "c4_ppl": generation_eval_metrics.get("c4"),
+                "fineweb_edu_ppl": generation_eval_metrics.get("fineweb_edu"),
+                "eval_tokens_used": args.eval_tokens if generation_eval_metrics else 0,
+                "num_offspring": args.offspring,
+                "num_survivors_stage_1": survivors[0] if len(survivors) > 0 else None,
+                "num_survivors_stage_2": survivors[1] if len(survivors) > 1 else None,
+                "num_survivors_stage_3": survivors[2] if len(survivors) > 2 else None,
+                "survivors_per_selection": survivors,
+                "tokens_per_selection": list(args.tokens_per_selection),
+                "active_parameters": generation_compression["parameter_statistics"]["active_parameters"],
+                "average_bitwidth_active": None,
+                "estimated_weight_memory_mb": generation_compression["model_size_statistics"][
+                    "estimated_weight_memory_mb"
+                ],
+                "dropped_attention_count": generation_depth_details["dropped_attention_count"],
+                "dropped_mlp_count": generation_depth_details["dropped_mlp_count"],
+                "mutation_summary": {
+                    "type": "depth_level_switch",
+                    "offspring_generated": args.offspring,
+                    "maximum_mutations_per_offspring": args.max_mutations,
+                },
+                "accepted_parent_replacement": population[0] != generation_parent,
+                "runtime_seconds_cumulative": reporter.runtime_seconds(),
+                "peak_gpu_memory_mb": peak_gpu_memory()[0],
+            }
+        )
+
+    final_removed_state = expand_removed_state(population[0], args.drop_two_consecutive)
+    load_states(model, layers, population[0], args.drop_two_consecutive)
+    layer_drop_config = get_layer_drop_config(final_removed_state)
+    if args.drop_config_dir:
+        os.makedirs(args.drop_config_dir, exist_ok=True)
+        with open(os.path.join(args.drop_config_dir, "layer_drop_config.txt"), "w") as f:
+            for line in layer_drop_config:
+                f.write(line + "\n")
+
     if args.save_dir:
         os.makedirs(args.save_dir, exist_ok=True)
         # Save model
@@ -529,16 +616,90 @@ def main():
         print(line)
 
     # Final evaluation
+    final_eval_metrics = {}
     for eval_dataset_name, eval_dataset in zip(args.eval_datasets, eval_datasets):
         ppl_eval = compute_perplexity(model, eval_dataset)
         print(f"{eval_dataset_name}: {ppl_eval:.2f}")
         log_dict[f"ppl_eval/{eval_dataset_name}"] = ppl_eval
+        final_eval_metrics[eval_dataset_name] = ppl_eval
 
     full_train_ppl = compute_perplexity(model, calibration_data)
     print(f"full train ppl: {full_train_ppl:.2e}")
     log_dict["full_train_ppl"] = full_train_ppl
     if args.log_wandb:
         wandb.log(log_dict)
+
+    final_calibration_kl = None
+    if args.fitness_fn == "kl":
+        final_calibration_kl = compute_kl_div(model, calibration_data, target_logits)
+
+    final_depth_details = build_depth_details(
+        attention_module_names,
+        mlp_module_names,
+        final_removed_state,
+    )
+    final_compression = compute_compression_metrics(model, final_depth_details)
+    final_candidate = build_final_candidate(
+        "depth_only",
+        final_depth_details,
+        {},
+        final_removed_state,
+    )
+    final_candidate_path = reporter.write_final_candidate(final_candidate)
+    output_dir = str(report_dir) if report_dir else None
+    reporter.write_summary(
+        model_name=args.model_name_or_path,
+        dataset_calibration=args.calibration_data,
+        dataset_eval=args.eval_datasets,
+        search_config={
+            "generations": args.generations,
+            "offspring": args.offspring,
+            "initial_candidates": args.initially_generated,
+            "initial_tokens": args.initial_tokens,
+            "selection_tokens": list(args.tokens_per_selection),
+            "selection_survivors": list(args.survivors_per_selection),
+            "fitness_fn": args.fitness_fn,
+            "sequence_length": args.calibration_sequence_length,
+            "calibration_tokens": args.calibration_tokens,
+            "eval_tokens": args.eval_tokens,
+            "eval_every": args.eval_every,
+            "seed": args.seed,
+        },
+        compression_config={
+            "target_depth_sparsity": args.sparsity,
+            "target_average_bitwidth": None,
+            "bits_available": [],
+            "group_size": None,
+            "drop_entire_block": args.drop_entire_block,
+            "drop_two_consecutive": args.drop_two_consecutive,
+        },
+        final_metrics={
+            "best_search_fitness": train_fitnesses[0],
+            "final_calibration_kl": final_calibration_kl,
+            "wikitext2_ppl": final_eval_metrics.get("wikitext2"),
+            "c4_ppl": final_eval_metrics.get("c4"),
+            "fineweb_ppl": final_eval_metrics.get("fineweb_edu"),
+            "train_ppl": full_train_ppl,
+        },
+        parameter_statistics=final_compression["parameter_statistics"],
+        depth_statistics={
+            key: value
+            for key, value in final_depth_details.items()
+            if key not in {"kept_modules", "attention_mask", "mlp_mask"}
+        },
+        quantization_statistics=final_compression["quantization_statistics"],
+        model_size_statistics=final_compression["model_size_statistics"],
+        artifacts={
+            "candidate_path": final_candidate_path,
+            "generation_log_path": (
+                os.path.join(output_dir, "generation_log.csv") if output_dir else None
+            ),
+            "config_path": (
+                os.path.join(output_dir, "layer_drop_config.txt") if output_dir else None
+            ),
+            "stdout_log_path": os.path.join(output_dir, "run.log") if output_dir else None,
+        },
+    )
 
 
 if __name__ == "__main__":

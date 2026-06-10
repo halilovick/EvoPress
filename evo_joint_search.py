@@ -25,6 +25,16 @@ from src.model_utils import (
     make_dummy_forward,
     restore_forward,
 )
+from src.run_reporting import (
+    RunReporter,
+    available_bitwidths,
+    build_depth_details,
+    build_final_candidate,
+    compute_compression_metrics,
+    flatten_quant_state,
+    module_name,
+    peak_gpu_memory,
+)
 
 
 def get_layer_drop_config(removed_state) -> List[str]:
@@ -471,6 +481,11 @@ def parse_args():
 
 def main():
     args = parse_args()
+    reporter = RunReporter(
+        args.output_dir,
+        search_type="joint_depth_quant",
+        repo_root=os.path.dirname(os.path.abspath(__file__)),
+    )
 
     assert len(args.survivors_per_selection) == len(args.tokens_per_selection)
     assert args.survivors_per_selection[-1] == 1
@@ -531,6 +546,12 @@ def main():
 
     # Prepare depth-pruning part.
     layers = get_layers(model)
+    attention_module_names = [
+        module_name(model, getattr(layer, get_attn_layer_name(model))) for layer in layers
+    ]
+    mlp_module_names = [
+        module_name(model, getattr(layer, get_mlp_layer_name(model))) for layer in layers
+    ]
     total_blocks = len(layers)
     blocks_to_remove = int(args.drop_sparsity * total_blocks)
     print(f"Total blocks: {total_blocks}")
@@ -604,6 +625,8 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     for generation in range(args.generations):
+        generation_parent = copy.deepcopy(parent)
+        generation_train_fitness = train_fitness
         print(f"Generation {generation + 1}/{args.generations}")
         print(f"Train fitness: {train_fitness:.4e}")
         print("Drop config:")
@@ -625,20 +648,25 @@ def main():
 
         apply_joint_state(model, layers, grouped_layer_names, parent, args.quant_weights_path)
 
+        generation_eval_metrics = {}
+        ppl_train = None
         if generation % args.eval_every == 0:
             for eval_dataset_name, eval_dataset in zip(args.eval_datasets, eval_datasets):
                 ppl_eval = compute_perplexity(model, eval_dataset)
                 print(f"{eval_dataset_name}: {ppl_eval:.2f}")
+                generation_eval_metrics[eval_dataset_name] = ppl_eval
 
             ppl_train = compute_perplexity(model, calibration_data)
             print(f"ppl_train: {ppl_train:.2f}")
 
         offspring_list = []
+        mutation_counts = {"depth": 0, "quantization": 0}
 
         while len(offspring_list) < args.offspring:
             offspring = copy.deepcopy(parent)
 
             if random.random() < 0.5:
+                mutation_type = "depth"
                 offspring["drop"] = mutate_drop_state(
                     offspring["drop"],
                     args.drop_entire_block,
@@ -654,6 +682,7 @@ def main():
                         args.step_size,
                     )
             else:
+                mutation_type = "quantization"
                 offspring["quant"] = mutate_quant_state(
                     model,
                     grouped_layer_names,
@@ -667,6 +696,7 @@ def main():
                 continue
 
             offspring_list.append(offspring)
+            mutation_counts[mutation_type] += 1
 
         for num_survive, num_tokens in zip(args.survivors_per_selection, args.tokens_per_selection):
             if num_survive == args.survivors_per_selection[-1]:
@@ -688,6 +718,63 @@ def main():
 
         parent = offspring_list[0]
         train_fitness = train_fitnesses[0]
+
+        generation_depth_details = build_depth_details(
+            attention_module_names,
+            mlp_module_names,
+            generation_parent["drop"],
+        )
+        generation_bitwidths = flatten_quant_state(
+            grouped_layer_names,
+            generation_parent["quant"],
+        )
+        generation_compression = compute_compression_metrics(
+            model,
+            generation_depth_details,
+            generation_bitwidths,
+        )
+        survivors = list(args.survivors_per_selection)
+        reporter.append_generation(
+            {
+                "generation": generation + 1,
+                "best_search_fitness": generation_train_fitness,
+                "fitness_fn": args.fitness_fn,
+                "best_calibration_kl": None,
+                "best_train_ppl": ppl_train,
+                "wikitext2_ppl": generation_eval_metrics.get("wikitext2"),
+                "c4_ppl": generation_eval_metrics.get("c4"),
+                "fineweb_edu_ppl": generation_eval_metrics.get("fineweb_edu"),
+                "eval_tokens_used": args.eval_tokens if generation_eval_metrics else 0,
+                "num_offspring": args.offspring,
+                "num_survivors_stage_1": survivors[0] if len(survivors) > 0 else None,
+                "num_survivors_stage_2": survivors[1] if len(survivors) > 1 else None,
+                "num_survivors_stage_3": survivors[2] if len(survivors) > 2 else None,
+                "survivors_per_selection": survivors,
+                "tokens_per_selection": list(args.tokens_per_selection),
+                "active_parameters": generation_compression["parameter_statistics"][
+                    "active_parameters"
+                ],
+                "average_bitwidth_active": generation_compression["quantization_statistics"][
+                    "average_bitwidth_active"
+                ],
+                "estimated_weight_memory_mb": generation_compression["model_size_statistics"][
+                    "estimated_weight_memory_mb"
+                ],
+                "dropped_attention_count": generation_depth_details[
+                    "dropped_attention_count"
+                ],
+                "dropped_mlp_count": generation_depth_details["dropped_mlp_count"],
+                "mutation_summary": {
+                    "type": "mixed_depth_quantization",
+                    "accepted_offspring_by_type": mutation_counts,
+                    "maximum_depth_mutations_per_offspring": args.max_drop_mutations,
+                    "quantization_step_size": args.step_size,
+                },
+                "accepted_parent_replacement": parent != generation_parent,
+                "runtime_seconds_cumulative": reporter.runtime_seconds(),
+                "peak_gpu_memory_mb": peak_gpu_memory()[0],
+            }
+        )
 
     # Save final joint configuration.
     drop_config = get_layer_drop_config(parent["drop"])
@@ -730,12 +817,90 @@ def main():
     # Final evaluation.
     apply_joint_state(model, layers, grouped_layer_names, parent, args.quant_weights_path)
 
+    final_eval_metrics = {}
     for eval_dataset_name, eval_dataset in zip(args.eval_datasets, eval_datasets):
         ppl_eval = compute_perplexity(model, eval_dataset)
         print(f"{eval_dataset_name}: {ppl_eval:.2f}")
+        final_eval_metrics[eval_dataset_name] = ppl_eval
 
     ppl_train = compute_perplexity(model, calibration_data)
     print(f"ppl_train: {ppl_train:.2f}")
+
+    final_calibration_kl = None
+    if args.fitness_fn == "kl":
+        final_calibration_kl = compute_kl_div(model, calibration_data, target_logits)
+
+    final_depth_details = build_depth_details(
+        attention_module_names,
+        mlp_module_names,
+        parent["drop"],
+    )
+    final_bitwidths = flatten_quant_state(grouped_layer_names, parent["quant"])
+    final_compression = compute_compression_metrics(
+        model,
+        final_depth_details,
+        final_bitwidths,
+    )
+    final_candidate = build_final_candidate(
+        "joint_depth_quant",
+        final_depth_details,
+        final_bitwidths,
+        parent,
+    )
+    final_candidate_path = reporter.write_final_candidate(final_candidate)
+    reporter.write_summary(
+        model_name=args.model_name_or_path,
+        dataset_calibration=args.calibration_data,
+        dataset_eval=args.eval_datasets,
+        search_config={
+            "generations": args.generations,
+            "offspring": args.offspring,
+            "initial_candidates": args.initially_generated,
+            "initial_tokens": args.initial_tokens,
+            "selection_tokens": list(args.tokens_per_selection),
+            "selection_survivors": list(args.survivors_per_selection),
+            "fitness_fn": args.fitness_fn,
+            "sequence_length": args.calibration_sequence_length,
+            "calibration_tokens": args.calibration_tokens,
+            "eval_tokens": args.eval_tokens,
+            "eval_every": args.eval_every,
+            "seed": args.seed,
+        },
+        compression_config={
+            "target_depth_sparsity": args.drop_sparsity,
+            "target_average_bitwidth": args.target_bitwidth,
+            "bits_available": available_bitwidths(args.quant_weights_path),
+            "group_size": None,
+            "group_rule": args.group_rule,
+            "active_quant_budget": args.active_quant_budget,
+            "drop_entire_block": args.drop_entire_block,
+            "quant_weights_path": args.quant_weights_path,
+        },
+        final_metrics={
+            "best_search_fitness": train_fitness,
+            "final_calibration_kl": final_calibration_kl,
+            "wikitext2_ppl": final_eval_metrics.get("wikitext2"),
+            "c4_ppl": final_eval_metrics.get("c4"),
+            "fineweb_ppl": final_eval_metrics.get("fineweb_edu"),
+            "train_ppl": ppl_train,
+        },
+        parameter_statistics=final_compression["parameter_statistics"],
+        depth_statistics={
+            key: value
+            for key, value in final_depth_details.items()
+            if key not in {"kept_modules", "attention_mask", "mlp_mask"}
+        },
+        quantization_statistics=final_compression["quantization_statistics"],
+        model_size_statistics=final_compression["model_size_statistics"],
+        artifacts={
+            "candidate_path": final_candidate_path,
+            "generation_log_path": os.path.join(args.output_dir, "generation_log.csv"),
+            "config_path": os.path.join(args.output_dir, "joint_config.json"),
+            "depth_config_path": os.path.join(args.output_dir, "joint_drop_config.txt"),
+            "quant_config_path": os.path.join(args.output_dir, "joint_quant_config.txt"),
+            "stdout_log_path": os.path.join(args.output_dir, "run.log"),
+        },
+    )
 
 
 if __name__ == "__main__":
