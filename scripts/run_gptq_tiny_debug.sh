@@ -41,6 +41,7 @@ MEMORY_POLL_INTERVAL_SECONDS="${MEMORY_POLL_INTERVAL_SECONDS:-5}"
 DRY_RUN="${DRY_RUN:-0}"
 CHECK_RUNTIME_DEPENDENCIES="${CHECK_RUNTIME_DEPENDENCIES:-1}"
 DROP_SAVED_FILE_CACHE="${DROP_SAVED_FILE_CACHE:-1}"
+EXPECTED_MODULE_DIRS="${EXPECTED_MODULE_DIRS:-}"
 
 read -r -a BITS_LIST_ARGS <<< "$BITS_LIST"
 read -r -a PRE_BLOCK_MODULES_ARGS <<< "$PRE_BLOCK_MODULES"
@@ -313,6 +314,7 @@ write_db_summary() {
         printf 'save_root=%s\n' "$SAVE_ROOT"
         printf 'quant_db_dir=%s\n' "$QUANT_DB_DIR"
         printf 'generated_module_dirs=%s\n' "$module_dirs"
+        printf 'expected_module_dirs=%s\n' "$EXPECTED_MODULE_DIRS"
         printf 'generated_weight_files=%s\n' "$weight_files"
         printf 'missing_expected_weight_files=%s\n' "$missing_weight_files"
         printf 'database_size_mb=%s\n' "$size_mb"
@@ -437,6 +439,10 @@ if [[ "$RUN_EXIT_CODE" != "0" ]]; then
 elif [[ "${MODULE_DIRS:-0}" == "0" || "${WEIGHT_FILES:-0}" == "0" ]]; then
     STATUS=failed
     NOTES="last_successful_step=quant_database_process_completed; no_quant_weight_files; generated_module_dirs=${MODULE_DIRS}; generated_weight_files=${WEIGHT_FILES}; database_size_mb=${DATABASE_SIZE_MB}; quant_db_dir=${QUANT_DB_DIR}"
+    FINAL_EXIT_CODE=1
+elif [[ -n "$EXPECTED_MODULE_DIRS" && "$MODULE_DIRS" != "$EXPECTED_MODULE_DIRS" ]]; then
+    STATUS=failed
+    NOTES="last_successful_step=quant_database_process_completed; incomplete_module_count; expected_module_dirs=${EXPECTED_MODULE_DIRS}; generated_module_dirs=${MODULE_DIRS}; generated_weight_files=${WEIGHT_FILES}; missing_expected_weight_files=${MISSING_WEIGHT_FILES}; database_size_mb=${DATABASE_SIZE_MB}; quant_db_dir=${QUANT_DB_DIR}"
     FINAL_EXIT_CODE=1
 elif [[ "${MISSING_WEIGHT_FILES:-0}" != "0" ]]; then
     STATUS=failed

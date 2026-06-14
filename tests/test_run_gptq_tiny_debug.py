@@ -58,6 +58,7 @@ class RunGptqTinyDebugTest(unittest.TestCase):
                     "EXPERIMENT_LOG": str(experiment_log),
                     "OUTPUT_DIR": str(output_dir),
                     "RUN_ID": "quant_fixture",
+                    "EXPECTED_MODULE_DIRS": "2",
                     "MEMORY_POLL_INTERVAL_SECONDS": "0.1",
                 },
             )
@@ -74,6 +75,7 @@ class RunGptqTinyDebugTest(unittest.TestCase):
 
             summary = (output_dir / "quant_db_summary.txt").read_text(encoding="utf-8")
             self.assertIn("generated_module_dirs=2", summary)
+            self.assertIn("expected_module_dirs=2", summary)
             self.assertIn("generated_weight_files=6", summary)
             self.assertIn("missing_expected_weight_files=0", summary)
 
@@ -86,6 +88,31 @@ class RunGptqTinyDebugTest(unittest.TestCase):
             self.assertEqual(row["sparsity_or_bits"], "2 3 4")
             self.assertIn("generated_module_dirs=2", row["notes"])
             self.assertIn("generated_weight_files=6", row["notes"])
+
+    def test_fixture_run_rejects_incomplete_module_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            output_dir = temp_path / "outputs" / "quant_fixture"
+            experiment_log = temp_path / "results" / "experiment_log.csv"
+            result = self.run_command(
+                [str(LAUNCHER)],
+                {
+                    "CHECK_RUNTIME_DEPENDENCIES": "0",
+                    "PYTHON_BIN": sys.executable,
+                    "TORCHRUN_BIN": str(FIXTURE),
+                    "EXPERIMENT_LOG": str(experiment_log),
+                    "OUTPUT_DIR": str(output_dir),
+                    "RUN_ID": "quant_fixture_incomplete",
+                    "EXPECTED_MODULE_DIRS": "3",
+                    "MEMORY_POLL_INTERVAL_SECONDS": "0.1",
+                },
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            with experiment_log.open(newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(rows[0]["status"], "failed")
+            self.assertIn("incomplete_module_count", rows[0]["notes"])
 
 
 if __name__ == "__main__":
