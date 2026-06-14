@@ -9,6 +9,7 @@ MODEL="${MODEL:-mistralai/Mistral-7B-v0.3}"
 CALIB_DATA="${CALIB_DATA:-wikitext2}"
 SEQUENCE_LENGTH="${SEQUENCE_LENGTH:-2048}"
 CALIB_TOKENS="${CALIB_TOKENS:-8192}"
+EVAL_EVERY="${EVAL_EVERY:-1}"
 SPARSITY="${SPARSITY:-0.375}"
 GENERATIONS="${GENERATIONS:-10}"
 OFFSPRING="${OFFSPRING:-8}"
@@ -81,7 +82,7 @@ COMMAND=(
     --calibration_data "$CALIB_DATA"
     --calibration_tokens "$CALIB_TOKENS"
     --calibration_sequence_length "$SEQUENCE_LENGTH"
-    --eval_every 1
+    --eval_every "$EVAL_EVERY"
     --eval_datasets wikitext2
     --eval_sequence_length "$SEQUENCE_LENGTH"
     --population_size 1

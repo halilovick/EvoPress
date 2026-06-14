@@ -1,6 +1,7 @@
 import csv
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,8 @@ class RunDropSearchScriptsTest(unittest.TestCase):
             result = self.run_script(
                 SINGLE_RUN_SCRIPT,
                 env={
+                    "CHECK_RUNTIME_DEPENDENCIES": "0",
+                    "PYTHON_BIN": sys.executable,
                     "EVO_DROP_SEARCH_SCRIPT": str(FIXTURE_EMITTER),
                     "EXPERIMENT_LOG": str(experiment_log),
                     "OUTPUT_DIR": str(output_dir),
@@ -91,6 +94,20 @@ class RunDropSearchScriptsTest(unittest.TestCase):
             self.assertIn("--tokens_per_selection 512 2048", result.stdout)
             self.assertNotIn("--drop_entire_block", result.stdout)
 
+    def test_single_run_accepts_eval_frequency_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_script(
+                SINGLE_RUN_SCRIPT,
+                "--dry-run",
+                env={
+                    "OUTPUT_DIR": str(Path(temp_dir) / "depth"),
+                    "EVAL_EVERY": "5",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--eval_every 5", result.stdout)
+
     def test_single_run_failure_preserves_artifacts_and_failed_log_row(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -99,6 +116,8 @@ class RunDropSearchScriptsTest(unittest.TestCase):
             result = self.run_script(
                 SINGLE_RUN_SCRIPT,
                 env={
+                    "CHECK_RUNTIME_DEPENDENCIES": "0",
+                    "PYTHON_BIN": sys.executable,
                     "EVO_DROP_SEARCH_SCRIPT": str(temp_path / "missing_evo_drop_search.py"),
                     "EXPERIMENT_LOG": str(experiment_log),
                     "OUTPUT_DIR": str(output_dir),
