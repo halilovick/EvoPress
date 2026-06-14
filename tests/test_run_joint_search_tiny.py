@@ -101,6 +101,25 @@ class RunJointSearchTinyTest(unittest.TestCase):
             self.assertIn("--group_rule size", result.stdout)
             self.assertIn("--active_quant_budget", result.stdout)
 
+    def test_active_quant_budget_rejects_non_size_grouping_without_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "outputs" / "joint"
+            result = self.run_command(
+                [str(LAUNCHER)],
+                {
+                    "OUTPUT_DIR": str(output_dir),
+                    "ACTIVE_QUANT_BUDGET": "1",
+                    "GROUP_RULE": "none",
+                },
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(
+                "ACTIVE_QUANT_BUDGET=1 requires GROUP_RULE=size",
+                result.stderr,
+            )
+            self.assertFalse(output_dir.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

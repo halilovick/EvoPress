@@ -145,6 +145,13 @@ check_runtime_dependencies() {
     fi
 }
 
+validate_configuration() {
+    if [[ "$ACTIVE_QUANT_BUDGET" == "1" && "$GROUP_RULE" != "size" ]]; then
+        printf 'ACTIVE_QUANT_BUDGET=1 requires GROUP_RULE=size.\n' >&2
+        return 2
+    fi
+}
+
 write_command_file() {
     {
         printf '#!/usr/bin/env bash\n'
@@ -297,6 +304,8 @@ append_experiment_row() {
         --notes "$notes" \
         --output-dir "$OUTPUT_DIR"
 }
+
+validate_configuration || exit 2
 
 if [[ "$DRY_RUN" == "1" ]]; then
     printf 'Dry run only. Would prepare command for %s:\n' "$RUN_ID"
