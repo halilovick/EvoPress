@@ -8,6 +8,7 @@ cd "$REPO_ROOT"
 MODEL="${MODEL:-mistralai/Mistral-7B-v0.3}"
 QUANT_WEIGHTS_PATH="${QUANT_WEIGHTS_PATH:-outputs/experiments/quant_db_mistral_qproj_debug_bits234/quant_db/Mistral-7B-v0.3/3bit}"
 OUTPUTS_ROOT="${OUTPUTS_ROOT:-outputs/experiments}"
+RESULTS_RUNS_ROOT="${RESULTS_RUNS_ROOT:-results/runs}"
 EXPERIMENT_LOG="${EXPERIMENT_LOG:-results/experiment_log.csv}"
 RUN_PREFIX="${RUN_PREFIX:-thesis_medium}"
 RUN_SUFFIX="${RUN_SUFFIX:-}"
@@ -39,6 +40,7 @@ EXPECTED_QUANT_MODULES="${EXPECTED_QUANT_MODULES:-32}"
 EXPECTED_QUANT_WEIGHT_FILES="${EXPECTED_QUANT_WEIGHT_FILES:-96}"
 CONTINUE_ON_FAILURE="${CONTINUE_ON_FAILURE:-0}"
 DRY_RUN="${DRY_RUN:-0}"
+SYNC_RESULTS="${SYNC_RESULTS:-1}"
 
 usage() {
     cat <<'EOF'
@@ -53,6 +55,7 @@ three-stage selection, 25% depth sparsity, and a 3-bit q-projection budget.
 Completed structured runs are validated and skipped automatically.
 Interrupted or failed non-empty runs are preserved and retried under the next
 available `_retryN` run identifier.
+By default, completed lightweight artifacts are copied to results/runs.
 EOF
 }
 
@@ -97,6 +100,56 @@ run_is_complete() {
 
     [[ -f "$output_dir/run_summary.json" ]] || return 1
     "$PYTHON_BIN" scripts/validate_run_outputs.py "$output_dir" >/dev/null 2>&1
+}
+
+sync_lightweight_artifacts() {
+    local method="$1"
+    local run_id="$2"
+    local output_dir="${OUTPUTS_ROOT}/${run_id}"
+    local destination="${RESULTS_RUNS_ROOT}/${run_id}"
+    local filename
+    local -a filenames=(
+        command.sh
+        runtime.txt
+    )
+
+    if [[ "$SYNC_RESULTS" != "1" || "$DRY_RUN" == "1" ]]; then
+        return
+    fi
+    if [[ "$method" == "dense" ]]; then
+        filenames+=(evaluation_metrics.csv)
+    else
+        filenames+=(
+            final_candidate.json
+            generation_log.csv
+            generation_metrics.csv
+            memory_samples.csv
+            run_summary.json
+        )
+        case "$method" in
+            depth)
+                filenames+=(layer_drop_config.txt)
+                ;;
+            quant)
+                filenames+=(quant_configuration.txt)
+                ;;
+            joint)
+                filenames+=(
+                    joint_config.json
+                    joint_drop_config.txt
+                    joint_quant_config.txt
+                )
+                ;;
+        esac
+    fi
+
+    mkdir -p "$destination"
+    for filename in "${filenames[@]}"; do
+        if [[ -f "$output_dir/$filename" ]]; then
+            cp "$output_dir/$filename" "$destination/$filename"
+        fi
+    done
+    printf 'Lightweight artifacts synced to %s\n' "$destination"
 }
 
 resolve_run_id() {
@@ -193,6 +246,7 @@ run_dense() {
     local base_run_id="${RUN_PREFIX}_dense_mistral_seq${SEQUENCE_LENGTH}_seed0${RUN_SUFFIX}"
     local run_id
     local output_dir
+    local exit_code
     local -a args=()
 
     run_id="$(resolve_run_id dense "$base_run_id")"
@@ -202,6 +256,7 @@ run_dense() {
     fi
     if run_is_complete dense "$output_dir"; then
         printf 'Skipping completed run: %s\n' "$run_id"
+        sync_lightweight_artifacts dense "$run_id"
         return 0
     fi
     if [[ "$DRY_RUN" == "1" ]]; then
@@ -219,6 +274,11 @@ run_dense() {
         RUN_ID="$run_id" \
         OUTPUT_DIR="$output_dir" \
         scripts/run_dense_eval.sh "${args[@]}"
+    exit_code="$?"
+    if [[ "$exit_code" == "0" ]]; then
+        sync_lightweight_artifacts dense "$run_id"
+    fi
+    return "$exit_code"
 }
 
 run_search() {
@@ -227,6 +287,7 @@ run_search() {
     local base_run_id
     local run_id
     local output_dir
+    local exit_code
     local -a args=()
 
     case "$method" in
@@ -252,6 +313,7 @@ run_search() {
     fi
     if run_is_complete "$method" "$output_dir"; then
         printf 'Skipping completed run: %s\n' "$run_id"
+        sync_lightweight_artifacts "$method" "$run_id"
         return 0
     fi
     if [[ "$DRY_RUN" == "1" ]]; then
@@ -343,6 +405,11 @@ run_search() {
                 scripts/run_joint_search_tiny.sh "${args[@]}"
             ;;
     esac
+    exit_code="$?"
+    if [[ "$exit_code" == "0" ]]; then
+        sync_lightweight_artifacts "$method" "$run_id"
+    fi
+    return "$exit_code"
 }
 
 validate_selection_schedule || exit 2

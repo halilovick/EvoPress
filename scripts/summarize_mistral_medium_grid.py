@@ -13,11 +13,13 @@ from pathlib import Path
 from typing import Any
 
 
-METHOD_ORDER = ("dense", "depth", "quant", "joint")
+METHOD_ORDER = ("dense", "depth", "quant", "uniform", "independent", "joint")
 METHOD_LABELS = {
     "dense": "Dense FP16",
     "depth": "Depth-only",
     "quant": "Quant-only q_proj",
+    "uniform": "Depth + uniform 3-bit q_proj",
+    "independent": "Independent depth + quant",
     "joint": "Joint depth + q_proj quant",
 }
 RUN_COLUMNS = (
@@ -35,6 +37,8 @@ RUN_COLUMNS = (
     "dropped_attention_count",
     "dropped_mlp_count",
     "runtime_seconds",
+    "source_search_runtime_seconds",
+    "total_pipeline_runtime_seconds",
     "peak_cpu_memory_mb",
     "peak_gpu_device_used_mb",
     "best_generation",
@@ -55,6 +59,8 @@ AGGREGATE_COLUMNS = (
     "active_parameter_ratio_mean",
     "runtime_minutes_mean",
     "runtime_minutes_sample_std",
+    "source_search_minutes_mean",
+    "total_pipeline_minutes_mean",
 )
 
 
@@ -104,10 +110,20 @@ def fmt(value: float | None, digits: int = 3) -> str:
     return f"{value:.{digits}f}"
 
 
-def write_csv(path: Path, fieldnames: tuple[str, ...], rows: list[dict[str, Any]]) -> None:
+def write_csv(
+    path: Path,
+    fieldnames: tuple[str, ...],
+    rows: list[dict[str, Any]],
+    *,
+    lineterminator: str = "\n",
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=fieldnames,
+            lineterminator=lineterminator,
+        )
         writer.writeheader()
         for row in rows:
             writer.writerow({key: row.get(key, "") for key in fieldnames})
@@ -134,6 +150,30 @@ def discover_run_dirs(runs_root: Path, prefix: str) -> dict[str, list[Path]]:
     return discovered
 
 
+def discover_composition_dirs(
+    runs_root: Path, prefix: str
+) -> dict[str, list[Path]]:
+    patterns = {
+        "independent": (
+            f"{prefix}_independent_depth_quant_mistral_s0.25_qproj3.0_seed*"
+        ),
+        "uniform": f"{prefix}_depth_uniform_quant_mistral_s0.25_qproj3.0_seed*",
+    }
+    discovered: dict[str, list[Path]] = {}
+    for method, pattern in patterns.items():
+        paths = sorted(
+            path
+            for path in runs_root.glob(pattern)
+            if (path / "evaluation_metrics.csv").is_file()
+        )
+        if len(paths) != 3:
+            raise SystemExit(
+                f"Expected 3 {method} evaluations matching {pattern}, found {len(paths)}."
+            )
+        discovered[method] = paths
+    return discovered
+
+
 def dense_row(runs_root: Path, prefix: str) -> dict[str, Any]:
     run_dir = runs_root / f"{prefix}_dense_mistral_seq1024_seed0"
     metrics = read_csv(run_dir / "evaluation_metrics.csv")
@@ -153,6 +193,8 @@ def dense_row(runs_root: Path, prefix: str) -> dict[str, Any]:
         "run_id": run_dir.name,
         "wikitext2_ppl": float(matches[0]["ppl"]),
         "runtime_seconds": float(runtime_values["runtime_seconds"]),
+        "source_search_runtime_seconds": 0.0,
+        "total_pipeline_runtime_seconds": float(runtime_values["runtime_seconds"]),
         "estimated_weight_memory_mb": 13824.5078125,
         "estimated_compression_ratio": 1.0,
         "active_parameter_ratio": 1.0,
@@ -190,12 +232,111 @@ def search_row(method: str, run_dir: Path) -> tuple[dict[str, Any], list[dict[st
         "dropped_attention_count": depth["dropped_attention_count"],
         "dropped_mlp_count": depth["dropped_mlp_count"],
         "runtime_seconds": final["runtime_seconds"],
+        "source_search_runtime_seconds": final["runtime_seconds"],
+        "total_pipeline_runtime_seconds": final["runtime_seconds"],
         "peak_cpu_memory_mb": final["peak_cpu_memory_mb"],
         "peak_gpu_device_used_mb": final["peak_gpu_device_used_mb"],
         "best_generation": int(best_generation),
         "accepted_generations": accepted,
     }
     return row, generation_rows, candidate
+
+
+def runtime_seconds(run_dir: Path) -> float:
+    values: dict[str, str] = {}
+    for line in (run_dir / "runtime.txt").read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value
+    if values.get("exit_code") != "0":
+        raise SystemExit(f"Run did not complete successfully: {run_dir}")
+    return float(values["runtime_seconds"])
+
+
+def wikitext2_ppl(run_dir: Path) -> float:
+    matches = [
+        row
+        for row in read_csv(run_dir / "evaluation_metrics.csv")
+        if row["dataset"] == "wikitext2"
+    ]
+    if len(matches) != 1:
+        raise SystemExit(f"Expected one WikiText2 metric in {run_dir}.")
+    return float(matches[0]["ppl"])
+
+
+def composition_row(
+    method: str,
+    seed: int,
+    run_dir: Path,
+    depth_dir: Path,
+    quant_dir: Path,
+) -> dict[str, Any]:
+    depth_summary = load_json(depth_dir / "run_summary.json")
+    quant_summary = load_json(quant_dir / "run_summary.json")
+    depth_candidate = load_json(depth_dir / "final_candidate.json")
+    quant_candidate = load_json(quant_dir / "final_candidate.json")
+    dropped_modules = set(depth_candidate["dropped_modules"])
+    bitwidth_by_module = quant_candidate["bitwidth_by_module"]
+
+    active_bitwidths: list[int] = []
+    for module, searched_bits in bitwidth_by_module.items():
+        attention_module = module.rsplit(".q_proj", 1)[0]
+        if attention_module in dropped_modules:
+            continue
+        active_bitwidths.append(3 if method == "uniform" else int(searched_bits))
+
+    searched_parameters = quant_summary["parameter_statistics"][
+        "searched_parameters_dense"
+    ]
+    parameters_per_module = searched_parameters / len(bitwidth_by_module)
+    active_quant_parameters = parameters_per_module * len(active_bitwidths)
+    active_parameters = depth_summary["parameter_statistics"]["active_parameters"]
+    active_nonsearched_parameters = active_parameters - active_quant_parameters
+    total_parameters = depth_summary["parameter_statistics"][
+        "total_parameters_dense"
+    ]
+    dense_weight_memory_mb = depth_summary["final_metrics"][
+        "dense_weight_memory_mb"
+    ]
+    effective_bits = (
+        active_nonsearched_parameters * 16
+        + parameters_per_module * sum(active_bitwidths)
+    )
+    average_bitwidth_total = effective_bits / total_parameters
+    estimated_weight_memory_mb = effective_bits / 8 / 1024 / 1024
+    estimated_compression_ratio = (
+        dense_weight_memory_mb / estimated_weight_memory_mb
+    )
+    evaluation_runtime = runtime_seconds(run_dir)
+    depth_runtime = depth_summary["final_metrics"]["runtime_seconds"]
+    quant_runtime = quant_summary["final_metrics"]["runtime_seconds"]
+    source_search_runtime = (
+        depth_runtime if method == "uniform" else depth_runtime + quant_runtime
+    )
+
+    return {
+        "method": method,
+        "seed": seed,
+        "run_id": run_dir.name,
+        "wikitext2_ppl": wikitext2_ppl(run_dir),
+        "active_parameter_ratio": depth_summary["final_metrics"][
+            "active_parameter_ratio"
+        ],
+        "average_bitwidth_active": statistics.mean(active_bitwidths),
+        "average_bitwidth_total": average_bitwidth_total,
+        "estimated_weight_memory_mb": estimated_weight_memory_mb,
+        "estimated_compression_ratio": estimated_compression_ratio,
+        "dropped_attention_count": depth_summary["depth_statistics"][
+            "dropped_attention_count"
+        ],
+        "dropped_mlp_count": depth_summary["depth_statistics"][
+            "dropped_mlp_count"
+        ],
+        "runtime_seconds": evaluation_runtime,
+        "source_search_runtime_seconds": source_search_runtime,
+        "total_pipeline_runtime_seconds": source_search_runtime
+        + evaluation_runtime,
+    }
 
 
 def aggregate_rows(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -216,6 +357,12 @@ def aggregate_rows(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         ppls = values("wikitext2_ppl")
         runtime_minutes = [value / 60 for value in values("runtime_seconds")]
+        source_search_minutes = [
+            value / 60 for value in values("source_search_runtime_seconds")
+        ]
+        total_pipeline_minutes = [
+            value / 60 for value in values("total_pipeline_runtime_seconds")
+        ]
         outputs.append(
             {
                 "method": method,
@@ -240,6 +387,50 @@ def aggregate_rows(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 ),
                 "runtime_minutes_mean": mean(runtime_minutes),
                 "runtime_minutes_sample_std": sample_std(runtime_minutes),
+                "source_search_minutes_mean": mean(source_search_minutes),
+                "total_pipeline_minutes_mean": mean(total_pipeline_minutes),
+            }
+        )
+    return outputs
+
+
+def matched_comparison_rows(
+    run_rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    by_method_seed = {
+        (row["method"], int(row["seed"])): row for row in run_rows
+    }
+    outputs: list[dict[str, Any]] = []
+    for seed in (0, 1, 2):
+        depth = by_method_seed[("depth", seed)]
+        uniform = by_method_seed[("uniform", seed)]
+        independent = by_method_seed[("independent", seed)]
+        joint = by_method_seed[("joint", seed)]
+        outputs.append(
+            {
+                "seed": seed,
+                "depth_ppl": depth["wikitext2_ppl"],
+                "uniform_composition_ppl": uniform["wikitext2_ppl"],
+                "independent_composition_ppl": independent["wikitext2_ppl"],
+                "joint_ppl": joint["wikitext2_ppl"],
+                "joint_minus_independent_ppl": (
+                    joint["wikitext2_ppl"] - independent["wikitext2_ppl"]
+                ),
+                "independent_active_qproj_bits": independent[
+                    "average_bitwidth_active"
+                ],
+                "independent_compression_ratio": independent[
+                    "estimated_compression_ratio"
+                ],
+                "joint_compression_ratio": joint[
+                    "estimated_compression_ratio"
+                ],
+                "independent_source_search_minutes": independent[
+                    "source_search_runtime_seconds"
+                ]
+                / 60,
+                "joint_search_minutes": joint["source_search_runtime_seconds"]
+                / 60,
             }
         )
     return outputs
@@ -360,9 +551,14 @@ def build_markdown(
     candidates: dict[str, dict[int, dict[str, Any]]],
 ) -> str:
     aggregate_by_method = {row["method"]: row for row in aggregate}
+    rows_by_method_seed = {
+        (row["method"], int(row["seed"])): row for row in run_rows
+    }
     dense_ppl = aggregate_by_method["dense"]["wikitext2_ppl_mean"]
     depth = aggregate_by_method["depth"]
     quant = aggregate_by_method["quant"]
+    uniform = aggregate_by_method["uniform"]
+    independent = aggregate_by_method["independent"]
     joint = aggregate_by_method["joint"]
     assert dense_ppl is not None
 
@@ -378,33 +574,42 @@ def build_markdown(
         / depth["estimated_compression_ratio_mean"]
         - 1
     ) * 100
+    joint_independent_deltas = [
+        rows_by_method_seed[("joint", seed)]["wikitext2_ppl"]
+        - rows_by_method_seed[("independent", seed)]["wikitext2_ppl"]
+        for seed in (0, 1, 2)
+    ]
+    joint_independent_mean_delta = statistics.mean(joint_independent_deltas)
+    independent_uniform_delta = (
+        independent["wikitext2_ppl_mean"] - uniform["wikitext2_ppl_mean"]
+    )
+    independent_compute_ratio = (
+        independent["source_search_minutes_mean"]
+        / joint["source_search_minutes_mean"]
+    )
 
     lines = [
         "# Mistral-7B Medium Search Comparison",
         "",
-        "This report is generated from the tracked structured artifacts for the thesis-scale medium grid. All search runs use `mistralai/Mistral-7B-v0.3`, WikiText2 calibration, sequence length `1024`, `8192` calibration tokens, `20` generations, `16` offspring, `32` initial candidates, and seeds `0`, `1`, and `2`.",
+        "This report is generated from the tracked artifacts for the thesis-scale medium grid. All searches use `mistralai/Mistral-7B-v0.3`, WikiText2 calibration, sequence length `1024`, `8192` calibration tokens, `20` generations, `16` offspring, `32` initial candidates, and seeds `0`, `1`, and `2`. The matched composition controls use the same final WikiText2 evaluation protocol.",
         "",
         "## Main comparison",
         "",
-        "| Method | Runs | WikiText2 PPL mean +/- SD | PPL range | Compression ratio | Effective bits/parameter | Active parameter ratio | Estimated weight MiB | Runtime min mean +/- SD |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Method | Runs | WikiText2 PPL mean +/- SD | Compression | Effective bits | Active q_proj bits | Source search min | Final job min |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for method in METHOD_ORDER:
         row = aggregate_by_method[method]
         ppl_sd = row["wikitext2_ppl_sample_std"]
-        runtime_sd = row["runtime_minutes_sample_std"]
         lines.append(
             f"| {METHOD_LABELS[method]} | {row['runs']} | "
             f"{fmt(row['wikitext2_ppl_mean'])}"
             + (f" +/- {fmt(ppl_sd)}" if ppl_sd is not None else "")
-            + f" | {fmt(row['wikitext2_ppl_min'])}-{fmt(row['wikitext2_ppl_max'])} | "
-            f"{fmt(row['estimated_compression_ratio_mean'])}x | "
+            + f" | {fmt(row['estimated_compression_ratio_mean'])}x | "
             f"{fmt(row['average_bitwidth_total_mean'])} | "
-            f"{fmt(row['active_parameter_ratio_mean'])} | "
-            f"{fmt(row['estimated_weight_memory_mb_mean'], 1)} | "
-            f"{fmt(row['runtime_minutes_mean'], 2)}"
-            + (f" +/- {fmt(runtime_sd, 2)}" if runtime_sd is not None else "")
-            + " |"
+            f"{fmt(mean([float(item['average_bitwidth_active']) for item in run_rows if item['method'] == method and item.get('average_bitwidth_active') not in (None, '')]))} | "
+            f"{fmt(row['source_search_minutes_mean'], 2)} | "
+            f"{fmt(row['runtime_minutes_mean'], 2)} |"
         )
 
     lines.extend(
@@ -417,11 +622,37 @@ def build_markdown(
             "",
             f"Depth-only search reaches {depth['estimated_compression_ratio_mean']:.3f}x compression at mean PPL {depth['wikitext2_ppl_mean']:.3f}. Joint search reaches {joint['estimated_compression_ratio_mean']:.3f}x at mean PPL {joint['wikitext2_ppl_mean']:.3f}. Relative to depth-only, joint search reduces the theoretical weight footprint by {joint_depth_memory_delta:.0f} MiB and increases the compression ratio by {joint_depth_ratio_gain:.1f}%, while mean PPL is {joint_depth_ppl_delta:.3f} higher.",
             "",
-            "This is evidence that the joint implementation can optimize a combined candidate at Mistral-7B scale. It is not yet evidence that joint search outperforms independent composition: the matched independent depth-plus-quant control has not been run for this medium grid.",
+            f"At the matched combined target, independent composition reaches mean PPL {independent['wikitext2_ppl_mean']:.3f}, compared with {joint['wikitext2_ppl_mean']:.3f} for joint search. The paired mean difference `joint - independent` is {joint_independent_mean_delta:.3f} PPL, so the current 20-generation joint method is worse on average. Independent composition is better in two of three seeds; with only three seeds this should be reported as evidence, not a definitive statistical claim.",
+            "",
+            f"Uniform 3-bit `q_proj` composition reaches mean PPL {uniform['wikitext2_ppl_mean']:.3f}. Its difference from the searched independent quantization profiles is only {abs(independent_uniform_delta):.3f} PPL. At this narrow `q_proj` scope, quantization-profile search therefore adds no visible benefit over uniform 3-bit assignment after depth pruning.",
+            "",
+            f"The runtime comparison is not equal: independent composition uses both the depth and quant searches, averaging {independent['source_search_minutes_mean']:.2f} search minutes, or {independent_compute_ratio:.2f}x the {joint['source_search_minutes_mean']:.2f} minutes used by one joint search. The existing result is target-matched but not compute-matched.",
+            "",
+            "## Matched per-seed comparison",
+            "",
+            "| Seed | Depth-only PPL | Uniform composition PPL | Independent composition PPL | Joint PPL | Joint - independent |",
+            "| ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for seed in (0, 1, 2):
+        depth_row = rows_by_method_seed[("depth", seed)]
+        uniform_row = rows_by_method_seed[("uniform", seed)]
+        independent_row = rows_by_method_seed[("independent", seed)]
+        joint_row = rows_by_method_seed[("joint", seed)]
+        lines.append(
+            f"| {seed} | {fmt(depth_row['wikitext2_ppl'])} | "
+            f"{fmt(uniform_row['wikitext2_ppl'])} | "
+            f"{fmt(independent_row['wikitext2_ppl'])} | "
+            f"{fmt(joint_row['wikitext2_ppl'])} | "
+            f"{joint_row['wikitext2_ppl'] - independent_row['wikitext2_ppl']:+.3f} |"
+        )
+
+    lines.extend(
+        [
             "",
             "## Per-seed results",
             "",
-            "| Method | Seed | WikiText2 PPL | Train PPL | Final KL | Compression | Effective bits | Runtime min | Best generation | Accepted generations |",
+            "| Method | Seed | WikiText2 PPL | Train PPL | Final KL | Compression | Effective bits | Source search min | Final job min | Best generation |",
             "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
@@ -432,8 +663,9 @@ def build_markdown(
             f"{fmt(row.get('final_calibration_kl'), 4)} | "
             f"{fmt(row.get('estimated_compression_ratio'))}x | "
             f"{fmt(row.get('average_bitwidth_total'))} | "
+            f"{fmt(float(row['source_search_runtime_seconds']) / 60, 2)} | "
             f"{fmt(float(row['runtime_seconds']) / 60, 2)} | "
-            f"{row.get('best_generation', '')} | {row.get('accepted_generations', '')} |"
+            f"{row.get('best_generation', '')} |"
         )
 
     lines.extend(["", "## Seed stability", ""])
@@ -458,24 +690,26 @@ def build_markdown(
             "- Compression ratios and model sizes are theoretical weight estimates. The current reconstruction database and runtime model remain floating point; these numbers are not measured checkpoint file sizes or inference-memory measurements.",
             "- Results currently cover WikiText2 only. C4, FineWeb-Edu, and downstream task evaluation remain necessary for broader claims.",
             "",
-            "## Required next comparison",
+            "## Interpretation for the thesis",
             "",
-            "Evaluate the independently selected depth mask and independently selected `q_proj` quantization profile together for seeds 0, 1, and 2. This produces the missing matched-target control:",
+            "The current baseline joint search does not beat independently optimized components at the same nominal compression target. This is a useful negative result: merely placing depth and quantization variables in one candidate representation is insufficient to produce a better solution.",
             "",
-            "```text",
-            "joint depth+quant search",
-            "vs.",
-            "independent depth search + independent quant search, composed afterward",
-            "```",
+            "Two explanations remain open:",
             "",
-            "Use the same WikiText2 evaluation length and each seed's medium-grid artifacts. Also report the active quantization average after dropped attention modules are excluded, because composing independent profiles can shift the active bit budget away from exactly 3.0 bits.",
+            "1. The joint search receives less total compute because one offspring population is split between depth and quantization mutations.",
+            "2. The current mutation operator does not explicitly model interactions between dropping an attention module and assigning bitwidth to its `q_proj` weights.",
             "",
-            "If the independently composed control is weaker than joint search, that supports the value of coupled optimization. If it is equal or better, the result motivates the planned thesis extension: a more interaction-aware joint mutation operator. After this control, extend the baseline joint search to 50 generations because the 20-generation curves are still improving.",
+            "## Required next experiment",
+            "",
+            f"Run the unchanged joint baseline for `50` generations and `16` offspring on seeds `0`, `1`, and `2`. Based on the measured 20-generation runtime, this should approach the independent pipeline's {independent['source_search_minutes_mean']:.2f}-minute search budget. It is the necessary compute-matched baseline because all three current joint runs achieved their best recorded fitness at generation 20.",
+            "",
+            "After the 50-generation baseline, implement joint-aware mutation and compare it against the unchanged 50-generation method with identical seeds and budgets. That ablation is the strongest candidate for the thesis implementation contribution.",
             "",
             "## Generated artifacts",
             "",
             "- `results/mistral_medium_runs.csv`: one row per run.",
             "- `results/mistral_medium_aggregate.csv`: method-level mean and sample standard deviation.",
+            "- `results/mistral_medium_matched_comparison.csv`: paired seed-level comparison of depth, uniform, independent, and joint configurations.",
             "- `results/mistral_medium_convergence.csv`: generation-wise search and evaluation metrics.",
             "- `results/mistral_medium_quality_compression.png`: quality-compression tradeoff.",
             "- `results/mistral_medium_convergence.png`: search convergence.",
@@ -498,7 +732,17 @@ def create_plots(
         "dense": "#444444",
         "depth": "#1f77b4",
         "quant": "#2ca02c",
+        "uniform": "#ff7f0e",
+        "independent": "#9467bd",
         "joint": "#d62728",
+    }
+    markers = {
+        "dense": "o",
+        "depth": "o",
+        "quant": "o",
+        "uniform": "D",
+        "independent": "s",
+        "joint": "X",
     }
 
     aggregate_by_method = {row["method"]: row for row in aggregate}
@@ -512,10 +756,11 @@ def create_plots(
             row["wikitext2_ppl_mean"],
             xerr=xerr,
             yerr=yerr,
-            fmt="o",
+            fmt=markers[method],
             markersize=8,
             capsize=4,
             color=colors[method],
+            markerfacecolor="white" if method == "uniform" else colors[method],
             label=METHOD_LABELS[method],
         )
     ax.set_xlabel("Estimated theoretical compression ratio")
@@ -602,19 +847,35 @@ def main() -> None:
     runs_root = Path(args.runs_root)
     output_dir = Path(args.output_dir)
     discovered = discover_run_dirs(runs_root, args.prefix)
+    composition_dirs = discover_composition_dirs(runs_root, args.prefix)
 
     run_rows = [dense_row(runs_root, args.prefix)]
     convergence: list[dict[str, Any]] = []
     candidates: dict[str, dict[int, dict[str, Any]]] = defaultdict(dict)
+    search_dirs_by_method_seed: dict[tuple[str, int], Path] = {}
     for method in ("depth", "quant", "joint"):
         for run_dir in discovered[method]:
             row, generation_rows, candidate = search_row(method, run_dir)
             run_rows.append(row)
             convergence.extend(convergence_rows(method, row, generation_rows))
             candidates[method][int(row["seed"])] = candidate
+            search_dirs_by_method_seed[(method, int(row["seed"]))] = run_dir
+
+    for method in ("uniform", "independent"):
+        for seed, run_dir in enumerate(composition_dirs[method]):
+            run_rows.append(
+                composition_row(
+                    method,
+                    seed,
+                    run_dir,
+                    search_dirs_by_method_seed[("depth", seed)],
+                    search_dirs_by_method_seed[("quant", seed)],
+                )
+            )
 
     run_rows.sort(key=lambda row: (METHOD_ORDER.index(row["method"]), row["seed"]))
     aggregate = aggregate_rows(run_rows)
+    matched_rows = matched_comparison_rows(run_rows)
     write_csv(output_dir / "mistral_medium_runs.csv", RUN_COLUMNS, run_rows)
     write_csv(
         output_dir / "mistral_medium_aggregate.csv",
@@ -636,6 +897,24 @@ def main() -> None:
             "runtime_seconds_cumulative",
         ),
         convergence,
+        lineterminator="\r\n",
+    )
+    write_csv(
+        output_dir / "mistral_medium_matched_comparison.csv",
+        (
+            "seed",
+            "depth_ppl",
+            "uniform_composition_ppl",
+            "independent_composition_ppl",
+            "joint_ppl",
+            "joint_minus_independent_ppl",
+            "independent_active_qproj_bits",
+            "independent_compression_ratio",
+            "joint_compression_ratio",
+            "independent_source_search_minutes",
+            "joint_search_minutes",
+        ),
+        matched_rows,
     )
     markdown = build_markdown(run_rows, aggregate, candidates)
     (output_dir / "mistral_medium_comparison.md").write_text(

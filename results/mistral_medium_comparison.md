@@ -1,36 +1,56 @@
 # Mistral-7B Medium Search Comparison
 
-This report is generated from the tracked structured artifacts for the thesis-scale medium grid. All search runs use `mistralai/Mistral-7B-v0.3`, WikiText2 calibration, sequence length `1024`, `8192` calibration tokens, `20` generations, `16` offspring, `32` initial candidates, and seeds `0`, `1`, and `2`.
+This report is generated from the tracked artifacts for the thesis-scale medium grid. All searches use `mistralai/Mistral-7B-v0.3`, WikiText2 calibration, sequence length `1024`, `8192` calibration tokens, `20` generations, `16` offspring, `32` initial candidates, and seeds `0`, `1`, and `2`. The matched composition controls use the same final WikiText2 evaluation protocol.
 
 ## Main comparison
 
-| Method | Runs | WikiText2 PPL mean +/- SD | PPL range | Compression ratio | Effective bits/parameter | Active parameter ratio | Estimated weight MiB | Runtime min mean +/- SD |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Dense FP16 | 1 | 5.960 | 5.960-5.960 | 1.000x | 16.000 | 1.000 | 13824.5 | 1.67 |
-| Depth-only | 3 | 11.818 +/- 0.621 | 11.203-12.445 | 1.317x | 12.148 | 0.759 | 10496.5 | 9.58 +/- 0.04 |
-| Quant-only q_proj | 3 | 5.938 +/- 0.000 | 5.938-5.938 | 1.064x | 15.037 | 1.000 | 12992.5 | 13.15 +/- 0.03 |
-| Joint depth + q_proj quant | 3 | 12.607 +/- 0.675 | 12.156-13.383 | 1.400x | 11.426 | 0.759 | 9872.5 | 10.15 +/- 0.03 |
+| Method | Runs | WikiText2 PPL mean +/- SD | Compression | Effective bits | Active q_proj bits | Source search min | Final job min |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dense FP16 | 1 | 5.960 | 1.000x | 16.000 |  | 0.00 | 1.67 |
+| Depth-only | 3 | 11.818 +/- 0.621 | 1.317x | 12.148 |  | 9.58 | 9.58 |
+| Quant-only q_proj | 3 | 5.938 +/- 0.000 | 1.064x | 15.037 | 3.000 | 13.15 | 13.15 |
+| Depth + uniform 3-bit q_proj | 3 | 11.953 +/- 0.586 | 1.400x | 11.426 | 3.000 | 9.58 | 1.41 |
+| Independent depth + quant | 3 | 11.947 +/- 0.585 | 1.400x | 11.425 | 2.972 | 22.73 | 1.45 |
+| Joint depth + q_proj quant | 3 | 12.607 +/- 0.675 | 1.400x | 11.426 | 3.000 | 10.15 | 10.15 |
 
 The dense reference reaches WikiText2 PPL 5.96. Quantizing only `q_proj` preserves dense quality (mean PPL 5.938) but produces only 1.064x whole-model compression because `q_proj` is a small fraction of total model weights.
 
 Depth-only search reaches 1.317x compression at mean PPL 11.818. Joint search reaches 1.400x at mean PPL 12.607. Relative to depth-only, joint search reduces the theoretical weight footprint by 624 MiB and increases the compression ratio by 6.3%, while mean PPL is 0.789 higher.
 
-This is evidence that the joint implementation can optimize a combined candidate at Mistral-7B scale. It is not yet evidence that joint search outperforms independent composition: the matched independent depth-plus-quant control has not been run for this medium grid.
+At the matched combined target, independent composition reaches mean PPL 11.947, compared with 12.607 for joint search. The paired mean difference `joint - independent` is 0.660 PPL, so the current 20-generation joint method is worse on average. Independent composition is better in two of three seeds; with only three seeds this should be reported as evidence, not a definitive statistical claim.
+
+Uniform 3-bit `q_proj` composition reaches mean PPL 11.953. Its difference from the searched independent quantization profiles is only 0.007 PPL. At this narrow `q_proj` scope, quantization-profile search therefore adds no visible benefit over uniform 3-bit assignment after depth pruning.
+
+The runtime comparison is not equal: independent composition uses both the depth and quant searches, averaging 22.73 search minutes, or 2.24x the 10.15 minutes used by one joint search. The existing result is target-matched but not compute-matched.
+
+## Matched per-seed comparison
+
+| Seed | Depth-only PPL | Uniform composition PPL | Independent composition PPL | Joint PPL | Joint - independent |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 11.805 | 11.990 | 11.970 | 13.383 | +1.413 |
+| 1 | 12.445 | 12.520 | 12.520 | 12.281 | -0.239 |
+| 2 | 11.203 | 11.350 | 11.350 | 12.156 | +0.806 |
 
 ## Per-seed results
 
-| Method | Seed | WikiText2 PPL | Train PPL | Final KL | Compression | Effective bits | Runtime min | Best generation | Accepted generations |
+| Method | Seed | WikiText2 PPL | Train PPL | Final KL | Compression | Effective bits | Source search min | Final job min | Best generation |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Dense FP16 | 0 | 5.960 |  |  | 1.000x | 16.000 | 1.67 |  |  |
-| Depth-only | 0 | 11.805 | 12.156 | 0.6851 | 1.317x | 12.148 | 9.53 | 20 | 13 |
-| Depth-only | 1 | 12.445 | 11.719 | 0.6992 | 1.317x | 12.148 | 9.58 | 19 | 12 |
-| Depth-only | 2 | 11.203 | 10.039 | 0.6079 | 1.317x | 12.148 | 9.62 | 17 | 14 |
-| Quant-only q_proj | 0 | 5.938 | 6.168 | 0.0057 | 1.064x | 15.037 | 13.13 | 18 | 3 |
-| Quant-only q_proj | 1 | 5.938 | 6.008 | 0.0050 | 1.064x | 15.037 | 13.13 | 1 | 4 |
-| Quant-only q_proj | 2 | 5.938 | 5.332 | 0.0050 | 1.064x | 15.037 | 13.18 | 17 | 4 |
-| Joint depth + q_proj quant | 0 | 13.383 | 13.508 | 0.7939 | 1.400x | 11.426 | 10.15 | 20 | 18 |
-| Joint depth + q_proj quant | 1 | 12.281 | 11.922 | 0.6992 | 1.400x | 11.426 | 10.18 | 20 | 19 |
-| Joint depth + q_proj quant | 2 | 12.156 | 11.117 | 0.7129 | 1.400x | 11.426 | 10.12 | 20 | 19 |
+| Dense FP16 | 0 | 5.960 |  |  | 1.000x | 16.000 | 0.00 | 1.67 |  |
+| Depth-only | 0 | 11.805 | 12.156 | 0.6851 | 1.317x | 12.148 | 9.53 | 9.53 | 20 |
+| Depth-only | 1 | 12.445 | 11.719 | 0.6992 | 1.317x | 12.148 | 9.58 | 9.58 | 19 |
+| Depth-only | 2 | 11.203 | 10.039 | 0.6079 | 1.317x | 12.148 | 9.62 | 9.62 | 17 |
+| Quant-only q_proj | 0 | 5.938 | 6.168 | 0.0057 | 1.064x | 15.037 | 13.13 | 13.13 | 18 |
+| Quant-only q_proj | 1 | 5.938 | 6.008 | 0.0050 | 1.064x | 15.037 | 13.13 | 13.13 | 1 |
+| Quant-only q_proj | 2 | 5.938 | 5.332 | 0.0050 | 1.064x | 15.037 | 13.18 | 13.18 | 17 |
+| Depth + uniform 3-bit q_proj | 0 | 11.990 |  |  | 1.400x | 11.426 | 9.53 | 1.42 |  |
+| Depth + uniform 3-bit q_proj | 1 | 12.520 |  |  | 1.400x | 11.426 | 9.58 | 1.40 |  |
+| Depth + uniform 3-bit q_proj | 2 | 11.350 |  |  | 1.400x | 11.426 | 9.62 | 1.40 |  |
+| Independent depth + quant | 0 | 11.970 |  |  | 1.400x | 11.426 | 22.67 | 1.55 |  |
+| Independent depth + quant | 1 | 12.520 |  |  | 1.401x | 11.424 | 22.72 | 1.40 |  |
+| Independent depth + quant | 2 | 11.350 |  |  | 1.401x | 11.424 | 22.80 | 1.40 |  |
+| Joint depth + q_proj quant | 0 | 13.383 | 13.508 | 0.7939 | 1.400x | 11.426 | 10.15 | 10.15 | 20 |
+| Joint depth + q_proj quant | 1 | 12.281 | 11.922 | 0.6992 | 1.400x | 11.426 | 10.18 | 10.18 | 20 |
+| Joint depth + q_proj quant | 2 | 12.156 | 11.117 | 0.7129 | 1.400x | 11.426 | 10.12 | 10.12 | 20 |
 
 ## Seed stability
 
@@ -80,24 +100,26 @@ The generated `mistral_medium_convergence.png` shows the generation-wise search 
 - Compression ratios and model sizes are theoretical weight estimates. The current reconstruction database and runtime model remain floating point; these numbers are not measured checkpoint file sizes or inference-memory measurements.
 - Results currently cover WikiText2 only. C4, FineWeb-Edu, and downstream task evaluation remain necessary for broader claims.
 
-## Required next comparison
+## Interpretation for the thesis
 
-Evaluate the independently selected depth mask and independently selected `q_proj` quantization profile together for seeds 0, 1, and 2. This produces the missing matched-target control:
+The current baseline joint search does not beat independently optimized components at the same nominal compression target. This is a useful negative result: merely placing depth and quantization variables in one candidate representation is insufficient to produce a better solution.
 
-```text
-joint depth+quant search
-vs.
-independent depth search + independent quant search, composed afterward
-```
+Two explanations remain open:
 
-Use the same WikiText2 evaluation length and each seed's medium-grid artifacts. Also report the active quantization average after dropped attention modules are excluded, because composing independent profiles can shift the active bit budget away from exactly 3.0 bits.
+1. The joint search receives less total compute because one offspring population is split between depth and quantization mutations.
+2. The current mutation operator does not explicitly model interactions between dropping an attention module and assigning bitwidth to its `q_proj` weights.
 
-If the independently composed control is weaker than joint search, that supports the value of coupled optimization. If it is equal or better, the result motivates the planned thesis extension: a more interaction-aware joint mutation operator. After this control, extend the baseline joint search to 50 generations because the 20-generation curves are still improving.
+## Required next experiment
+
+Run the unchanged joint baseline for `50` generations and `16` offspring on seeds `0`, `1`, and `2`. Based on the measured 20-generation runtime, this should approach the independent pipeline's 22.73-minute search budget. It is the necessary compute-matched baseline because all three current joint runs achieved their best recorded fitness at generation 20.
+
+After the 50-generation baseline, implement joint-aware mutation and compare it against the unchanged 50-generation method with identical seeds and budgets. That ablation is the strongest candidate for the thesis implementation contribution.
 
 ## Generated artifacts
 
 - `results/mistral_medium_runs.csv`: one row per run.
 - `results/mistral_medium_aggregate.csv`: method-level mean and sample standard deviation.
+- `results/mistral_medium_matched_comparison.csv`: paired seed-level comparison of depth, uniform, independent, and joint configurations.
 - `results/mistral_medium_convergence.csv`: generation-wise search and evaluation metrics.
 - `results/mistral_medium_quality_compression.png`: quality-compression tradeoff.
 - `results/mistral_medium_convergence.png`: search convergence.
