@@ -1,0 +1,186 @@
+{
+  "artifacts": {
+    "candidate_path": "outputs/experiments/thesis_medium_quant_mistral_qproj3.0_g20_o16_seed1/final_candidate.json",
+    "config_path": "outputs/experiments/thesis_medium_quant_mistral_qproj3.0_g20_o16_seed1/quant_configuration.txt",
+    "generation_log_path": "outputs/experiments/thesis_medium_quant_mistral_qproj3.0_g20_o16_seed1/generation_log.csv",
+    "memory_samples_path": "outputs/experiments/thesis_medium_quant_mistral_qproj3.0_g20_o16_seed1/memory_samples.csv",
+    "runtime_path": "outputs/experiments/thesis_medium_quant_mistral_qproj3.0_g20_o16_seed1/runtime.txt",
+    "stdout_log_path": "outputs/experiments/thesis_medium_quant_mistral_qproj3.0_g20_o16_seed1/run.log"
+  },
+  "compression_config": {
+    "bits_available": [
+      2,
+      3,
+      4
+    ],
+    "group_rule": "size",
+    "group_size": null,
+    "quant_weights_path": "outputs/experiments/quant_db_mistral_qproj_debug_bits234/quant_db/Mistral-7B-v0.3/3bit",
+    "target_average_bitwidth": 3.0,
+    "target_depth_sparsity": 0.0
+  },
+  "dataset_calibration": "wikitext2",
+  "dataset_eval": [
+    "wikitext2"
+  ],
+  "depth_statistics": {
+    "dropped_attention_count": 0,
+    "dropped_attention_layers": [],
+    "dropped_attention_modules": [],
+    "dropped_mlp_count": 0,
+    "dropped_mlp_layers": [],
+    "dropped_mlp_modules": [],
+    "dropped_modules": [],
+    "dropped_total_count": 0,
+    "num_attention_modules": 32,
+    "num_layers": 32,
+    "num_mlp_modules": 32
+  },
+  "final_metrics": {
+    "active_parameter_ratio": 1.0,
+    "active_parameters": 7248023552,
+    "average_bitwidth_active": 3.0,
+    "average_bitwidth_searched": 3.0,
+    "average_bitwidth_total": 15.037072409336453,
+    "best_search_fitness": 0.005001068115234375,
+    "c4_ppl": null,
+    "dense_weight_memory_mb": 13824.5078125,
+    "estimated_compression_ratio": 1.0640369058850623,
+    "estimated_weight_memory_mb": 12992.5078125,
+    "final_calibration_kl": 0.00499725341796875,
+    "fineweb_ppl": null,
+    "peak_cpu_cgroup_memory_mb": 16384.0,
+    "peak_cpu_memory_mb": 16384.0,
+    "peak_cpu_memory_source": "sampled_cgroup_memory.current",
+    "peak_gpu_device_used_mb": 14663.68,
+    "peak_gpu_device_used_source": "sampled_nvidia_smi",
+    "peak_gpu_memory_mb": 14280.6416015625,
+    "peak_gpu_reserved_mb": 14386.0,
+    "peak_process_rss_mb": 6398.76171875,
+    "runtime_seconds": 788.0,
+    "runtime_source": "launcher_wall_clock",
+    "search_process_runtime_seconds": 778.6269855555147,
+    "total_parameters_dense": 7248023552,
+    "train_ppl": 6.0078125,
+    "wikitext2_ppl": 5.9375
+  },
+  "git_commit": "2b4e4dc75c91a23982f05347a079927e9c32fd4c",
+  "launcher_finalized_at": "2026-06-14T14:12:37Z",
+  "metric_definitions": {
+    "active_parameters": "Theoretical parameters used by inference. Parameters in bypassed attention/MLP modules are excluded even though their tensors remain allocated.",
+    "average_bitwidth_active": "Parameter-weighted average over active searched weights only.",
+    "average_bitwidth_searched": "Parameter-weighted average over all searched weights, including assignments inside modules later bypassed by depth pruning.",
+    "average_bitwidth_total": "Theoretical effective bits divided by dense-model parameters. Dropped parameters contribute zero bits and active non-searched parameters use the dense dtype bitwidth.",
+    "estimated_compression_ratio": "Dense theoretical weight memory divided by estimated compressed weight memory.",
+    "peak_cpu_memory_mb": "Peak sampled container cgroup memory when memory_samples.csv is available; otherwise peak process RSS.",
+    "peak_gpu_device_used_mb": "Peak sampled total GPU device memory in use from nvidia-smi.",
+    "peak_gpu_memory_mb": "Peak tensor memory allocated by PyTorch in this process.",
+    "peak_process_rss_mb": "Peak resident set size for the Python search process.",
+    "runtime_seconds": "Launcher-measured model-command wall-clock runtime, including process startup."
+  },
+  "model_name": "mistralai/Mistral-7B-v0.3",
+  "model_size_statistics": {
+    "dense_dtype_bits": 16,
+    "dense_weight_memory_mb": 13824.5078125,
+    "estimated_compression_ratio": 1.0640369058850623,
+    "estimated_weight_memory_mb": 12992.5078125,
+    "model_size_note": "The estimated model size is theoretical and based on assigned bitwidths. It does not represent the on-disk size of the current floating-point reconstruction database.",
+    "nonsearched_weight_memory_mb": 12800.5078125,
+    "searched_weight_memory_mb": 192.0
+  },
+  "parameter_statistics": {
+    "active_nonsearched_parameters": 6711152640,
+    "active_parameter_ratio": 1.0,
+    "active_parameters": 7248023552,
+    "active_parameters_note": "Theoretical parameters used by inference. Parameters in bypassed attention/MLP modules are excluded even though their tensors remain allocated.",
+    "dropped_parameters": 0,
+    "nonsearched_parameters": 6711152640,
+    "searched_parameters_active": 536870912,
+    "searched_parameters_dense": 536870912,
+    "total_parameters_dense": 7248023552
+  },
+  "quantization_statistics": {
+    "active_quantized_module_count": 32,
+    "average_bitwidth_active": 3.0,
+    "average_bitwidth_by_projection_type": {
+      "q_proj": 3.0
+    },
+    "average_bitwidth_searched": 3.0,
+    "average_bitwidth_total": 15.037072409336453,
+    "bitwidth_by_module": {
+      "model.layers.0.self_attn.q_proj": 2,
+      "model.layers.1.self_attn.q_proj": 2,
+      "model.layers.10.self_attn.q_proj": 3,
+      "model.layers.11.self_attn.q_proj": 3,
+      "model.layers.12.self_attn.q_proj": 3,
+      "model.layers.13.self_attn.q_proj": 3,
+      "model.layers.14.self_attn.q_proj": 3,
+      "model.layers.15.self_attn.q_proj": 4,
+      "model.layers.16.self_attn.q_proj": 4,
+      "model.layers.17.self_attn.q_proj": 3,
+      "model.layers.18.self_attn.q_proj": 3,
+      "model.layers.19.self_attn.q_proj": 3,
+      "model.layers.2.self_attn.q_proj": 3,
+      "model.layers.20.self_attn.q_proj": 3,
+      "model.layers.21.self_attn.q_proj": 3,
+      "model.layers.22.self_attn.q_proj": 3,
+      "model.layers.23.self_attn.q_proj": 3,
+      "model.layers.24.self_attn.q_proj": 3,
+      "model.layers.25.self_attn.q_proj": 3,
+      "model.layers.26.self_attn.q_proj": 3,
+      "model.layers.27.self_attn.q_proj": 3,
+      "model.layers.28.self_attn.q_proj": 3,
+      "model.layers.29.self_attn.q_proj": 3,
+      "model.layers.3.self_attn.q_proj": 3,
+      "model.layers.30.self_attn.q_proj": 3,
+      "model.layers.31.self_attn.q_proj": 3,
+      "model.layers.4.self_attn.q_proj": 3,
+      "model.layers.5.self_attn.q_proj": 3,
+      "model.layers.6.self_attn.q_proj": 3,
+      "model.layers.7.self_attn.q_proj": 3,
+      "model.layers.8.self_attn.q_proj": 3,
+      "model.layers.9.self_attn.q_proj": 3
+    },
+    "bitwidth_histogram": {
+      "2": 2,
+      "3": 28,
+      "4": 2
+    },
+    "bitwidth_parameter_histogram": {
+      "2": 33554432,
+      "3": 469762048,
+      "4": 33554432
+    },
+    "quantized_module_count": 32
+  },
+  "run_name": "thesis_medium_quant_mistral_qproj3.0_g20_o16_seed1",
+  "schema_version": 2,
+  "search_config": {
+    "calibration_tokens": 8192,
+    "eval_every": 5,
+    "eval_tokens": 524288,
+    "eval_tokens_loaded_by_dataset": {
+      "wikitext2": 333824
+    },
+    "fitness_fn": "kl",
+    "generations": 20,
+    "initial_candidates": 32,
+    "initial_tokens": 512,
+    "offspring": 16,
+    "seed": 1,
+    "selection_survivors": [
+      8,
+      2,
+      1
+    ],
+    "selection_tokens": [
+      512,
+      2048,
+      8192
+    ],
+    "sequence_length": 1024
+  },
+  "search_type": "quant_only",
+  "timestamp_end": "2026-06-14T14:12:35Z",
+  "timestamp_start": "2026-06-14T13:59:37Z"
+}
