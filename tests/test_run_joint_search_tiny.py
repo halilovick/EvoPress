@@ -120,6 +120,43 @@ class RunJointSearchTinyTest(unittest.TestCase):
             )
             self.assertFalse(output_dir.exists())
 
+    def test_dry_run_supports_joint_aware_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "outputs" / "joint"
+            result = self.run_command(
+                [str(LAUNCHER), "--dry-run"],
+                {
+                    "OUTPUT_DIR": str(output_dir),
+                    "ACTIVE_QUANT_BUDGET": "1",
+                    "GROUP_RULE": "size",
+                    "JOINT_AWARE_MUTATION": "1",
+                    "JOINT_AWARE_PROBABILITY": "0.4",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--joint_aware_mutation", result.stdout)
+            self.assertIn("--joint_aware_probability 0.4", result.stdout)
+            self.assertFalse(output_dir.exists())
+
+    def test_joint_aware_mutation_requires_active_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "outputs" / "joint"
+            result = self.run_command(
+                [str(LAUNCHER)],
+                {
+                    "OUTPUT_DIR": str(output_dir),
+                    "JOINT_AWARE_MUTATION": "1",
+                },
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(
+                "JOINT_AWARE_MUTATION=1 requires ACTIVE_QUANT_BUDGET=1",
+                result.stderr,
+            )
+            self.assertFalse(output_dir.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

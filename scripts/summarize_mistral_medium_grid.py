@@ -13,14 +13,23 @@ from pathlib import Path
 from typing import Any
 
 
-METHOD_ORDER = ("dense", "depth", "quant", "uniform", "independent", "joint")
+METHOD_ORDER = (
+    "dense",
+    "depth",
+    "quant",
+    "uniform",
+    "independent",
+    "joint",
+    "joint_g50",
+)
 METHOD_LABELS = {
     "dense": "Dense FP16",
     "depth": "Depth-only",
     "quant": "Quant-only q_proj",
     "uniform": "Depth + uniform 3-bit q_proj",
     "independent": "Independent depth + quant",
-    "joint": "Joint depth + q_proj quant",
+    "joint": "Joint G20 depth + q_proj quant",
+    "joint_g50": "Joint G50 compute-matched",
 }
 RUN_COLUMNS = (
     "method",
@@ -172,6 +181,23 @@ def discover_composition_dirs(
             )
         discovered[method] = paths
     return discovered
+
+
+def discover_compute_matched_dirs(runs_root: Path) -> list[Path]:
+    pattern = (
+        "thesis_compute_matched_joint_mistral_s0.25_qproj3.0_g50_o16_seed*"
+    )
+    paths = sorted(
+        path
+        for path in runs_root.glob(pattern)
+        if (path / "run_summary.json").is_file()
+    )
+    if len(paths) != 3:
+        raise SystemExit(
+            f"Expected 3 compute-matched joint summaries matching {pattern}, "
+            f"found {len(paths)}."
+        )
+    return paths
 
 
 def dense_row(runs_root: Path, prefix: str) -> dict[str, Any]:
@@ -406,6 +432,7 @@ def matched_comparison_rows(
         uniform = by_method_seed[("uniform", seed)]
         independent = by_method_seed[("independent", seed)]
         joint = by_method_seed[("joint", seed)]
+        joint_g50 = by_method_seed[("joint_g50", seed)]
         outputs.append(
             {
                 "seed": seed,
@@ -415,6 +442,14 @@ def matched_comparison_rows(
                 "joint_ppl": joint["wikitext2_ppl"],
                 "joint_minus_independent_ppl": (
                     joint["wikitext2_ppl"] - independent["wikitext2_ppl"]
+                ),
+                "joint_g50_ppl": joint_g50["wikitext2_ppl"],
+                "joint_g50_minus_independent_ppl": (
+                    joint_g50["wikitext2_ppl"]
+                    - independent["wikitext2_ppl"]
+                ),
+                "joint_g20_minus_g50_ppl": (
+                    joint["wikitext2_ppl"] - joint_g50["wikitext2_ppl"]
                 ),
                 "independent_active_qproj_bits": independent[
                     "average_bitwidth_active"
@@ -430,6 +465,10 @@ def matched_comparison_rows(
                 ]
                 / 60,
                 "joint_search_minutes": joint["source_search_runtime_seconds"]
+                / 60,
+                "joint_g50_search_minutes": joint_g50[
+                    "source_search_runtime_seconds"
+                ]
                 / 60,
             }
         )
@@ -560,6 +599,7 @@ def build_markdown(
     uniform = aggregate_by_method["uniform"]
     independent = aggregate_by_method["independent"]
     joint = aggregate_by_method["joint"]
+    joint_g50 = aggregate_by_method["joint_g50"]
     assert dense_ppl is not None
 
     joint_depth_ppl_delta = (
@@ -587,11 +627,26 @@ def build_markdown(
         independent["source_search_minutes_mean"]
         / joint["source_search_minutes_mean"]
     )
+    joint_g50_independent_deltas = [
+        rows_by_method_seed[("joint_g50", seed)]["wikitext2_ppl"]
+        - rows_by_method_seed[("independent", seed)]["wikitext2_ppl"]
+        for seed in (0, 1, 2)
+    ]
+    joint_g50_independent_mean_delta = statistics.mean(
+        joint_g50_independent_deltas
+    )
+    joint_g20_g50_improvement = (
+        joint["wikitext2_ppl_mean"] - joint_g50["wikitext2_ppl_mean"]
+    )
+    compute_runtime_delta = (
+        joint_g50["source_search_minutes_mean"]
+        - independent["source_search_minutes_mean"]
+    )
 
     lines = [
         "# Mistral-7B Medium Search Comparison",
         "",
-        "This report is generated from the tracked artifacts for the thesis-scale medium grid. All searches use `mistralai/Mistral-7B-v0.3`, WikiText2 calibration, sequence length `1024`, `8192` calibration tokens, `20` generations, `16` offspring, `32` initial candidates, and seeds `0`, `1`, and `2`. The matched composition controls use the same final WikiText2 evaluation protocol.",
+        "This report is generated from the tracked artifacts for the thesis-scale Mistral grid. All searches use `mistralai/Mistral-7B-v0.3`, WikiText2 calibration, sequence length `1024`, `8192` calibration tokens, `16` offspring, `32` initial candidates, and seeds `0`, `1`, and `2`. The baseline searches use `20` generations and the compute-matched joint search uses `50`. All matched controls use the same final WikiText2 evaluation protocol.",
         "",
         "## Main comparison",
         "",
@@ -628,10 +683,12 @@ def build_markdown(
             "",
             f"The runtime comparison is not equal: independent composition uses both the depth and quant searches, averaging {independent['source_search_minutes_mean']:.2f} search minutes, or {independent_compute_ratio:.2f}x the {joint['source_search_minutes_mean']:.2f} minutes used by one joint search. The existing result is target-matched but not compute-matched.",
             "",
+            f"The compute-matched G50 joint search changes the conclusion. It reaches mean PPL {joint_g50['wikitext2_ppl_mean']:.3f}, improving over G20 by {joint_g20_g50_improvement:.3f} PPL and outperforming independent composition by {-joint_g50_independent_mean_delta:.3f} PPL on average. G50 is better in all three paired seeds. Its mean search runtime is {joint_g50['source_search_minutes_mean']:.2f} minutes versus {independent['source_search_minutes_mean']:.2f} minutes for the independent pipeline, a difference of {abs(compute_runtime_delta):.2f} minutes.",
+            "",
             "## Matched per-seed comparison",
             "",
-            "| Seed | Depth-only PPL | Uniform composition PPL | Independent composition PPL | Joint PPL | Joint - independent |",
-            "| ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| Seed | Depth-only | Uniform | Independent | Joint G20 | Joint G50 | G50 - independent | G20 - G50 |",
+            "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for seed in (0, 1, 2):
@@ -639,12 +696,15 @@ def build_markdown(
         uniform_row = rows_by_method_seed[("uniform", seed)]
         independent_row = rows_by_method_seed[("independent", seed)]
         joint_row = rows_by_method_seed[("joint", seed)]
+        joint_g50_row = rows_by_method_seed[("joint_g50", seed)]
         lines.append(
             f"| {seed} | {fmt(depth_row['wikitext2_ppl'])} | "
             f"{fmt(uniform_row['wikitext2_ppl'])} | "
             f"{fmt(independent_row['wikitext2_ppl'])} | "
             f"{fmt(joint_row['wikitext2_ppl'])} | "
-            f"{joint_row['wikitext2_ppl'] - independent_row['wikitext2_ppl']:+.3f} |"
+            f"{fmt(joint_g50_row['wikitext2_ppl'])} | "
+            f"{joint_g50_row['wikitext2_ppl'] - independent_row['wikitext2_ppl']:+.3f} | "
+            f"{joint_row['wikitext2_ppl'] - joint_g50_row['wikitext2_ppl']:+.3f} |"
         )
 
     lines.extend(
@@ -671,6 +731,7 @@ def build_markdown(
     lines.extend(["", "## Seed stability", ""])
     lines.extend(overlap_markdown("depth", candidates["depth"]))
     lines.extend(overlap_markdown("joint", candidates["joint"]))
+    lines.extend(overlap_markdown("joint_g50", candidates["joint_g50"]))
     lines.extend(quant_profile_markdown(candidates["quant"]))
     lines.extend(
         [
@@ -678,13 +739,13 @@ def build_markdown(
             "",
             "## Convergence evidence",
             "",
-            "Depth and joint runs continued to accept improved parents near generation 20, and every joint run recorded its minimum search fitness at generation 20. The current budget therefore does not demonstrate full convergence. Quant-only quality was already close to dense throughout the search, although its calibration KL continued to change.",
+            "Depth and G20 joint runs continued to accept improved parents near generation 20, and every G20 joint run recorded its minimum search fitness at generation 20. Extending to 50 generations materially improved all three seeds. Some late G50 improvements still occurred around generations 47-50, so the curves should be described as substantially improved rather than proven fully converged. Quant-only quality was already close to dense throughout its search.",
             "",
-            "The generated `mistral_medium_convergence.png` shows the generation-wise search fitness and the periodic WikiText2 evaluations. Final evaluations are added at generation 20.",
+            "The generated `mistral_medium_convergence.png` shows generation-wise search fitness and periodic WikiText2 evaluations. Final evaluations are added at each run's terminal generation.",
             "",
             "## Hardware and measurement notes",
             "",
-            "- The nine searches ran on a Tesla V100 32 GB with a 16 GB container RAM limit.",
+            "- The twelve search runs used a Tesla V100 32 GB with a 16 GB container RAM limit.",
             "- Peak sampled device use was about 14.66 GB for every search.",
             "- Peak sampled CPU cgroup memory reached 16 GB, so CPU memory remains the binding resource and leaves little safety margin.",
             "- Compression ratios and model sizes are theoretical weight estimates. The current reconstruction database and runtime model remain floating point; these numbers are not measured checkpoint file sizes or inference-memory measurements.",
@@ -692,18 +753,15 @@ def build_markdown(
             "",
             "## Interpretation for the thesis",
             "",
-            "The current baseline joint search does not beat independently optimized components at the same nominal compression target. This is a useful negative result: merely placing depth and quantization variables in one candidate representation is insufficient to produce a better solution.",
+            "At 20 generations, joint search does not beat independently optimized components at the same compression target. Once search compute is matched, the unchanged 50-generation joint search beats independent composition in every seed. This demonstrates that coupled search is beneficial, but it needs enough generations because its offspring budget is shared across two mutation subspaces.",
             "",
-            "Two explanations remain open:",
+            "The uniform and independently searched quantization controls remain nearly identical. The main quality gain therefore comes from the depth-mask search and from giving joint optimization enough time, not from the narrow `q_proj` bit-allocation search alone.",
             "",
-            "1. The joint search receives less total compute because one offspring population is split between depth and quantization mutations.",
-            "2. The current mutation operator does not explicitly model interactions between dropping an attention module and assigning bitwidth to its `q_proj` weights.",
+            "## Next thesis contribution",
             "",
-            "## Required next experiment",
+            "Implement the planned joint-aware mutation operator behind an explicit opt-in flag. It should add budget-preserving drop-and-upgrade and restore-and-downgrade moves while retaining the current mixed mutation as the default baseline.",
             "",
-            f"Run the unchanged joint baseline for `50` generations and `16` offspring on seeds `0`, `1`, and `2`. Based on the measured 20-generation runtime, this should approach the independent pipeline's {independent['source_search_minutes_mean']:.2f}-minute search budget. It is the necessary compute-matched baseline because all three current joint runs achieved their best recorded fitness at generation 20.",
-            "",
-            "After the 50-generation baseline, implement joint-aware mutation and compare it against the unchanged 50-generation method with identical seeds and budgets. That ablation is the strongest candidate for the thesis implementation contribution.",
+            "Ablate unchanged G50 joint search versus joint-aware G50 search with identical model, seeds, compression target, population, token schedule, and offspring count. The hypothesis is that interaction-aware moves reach equal or lower PPL in fewer generations or improve the final G50 result.",
             "",
             "## Generated artifacts",
             "",
@@ -735,6 +793,7 @@ def create_plots(
         "uniform": "#ff7f0e",
         "independent": "#9467bd",
         "joint": "#d62728",
+        "joint_g50": "#8c1d40",
     }
     markers = {
         "dense": "o",
@@ -743,6 +802,7 @@ def create_plots(
         "uniform": "D",
         "independent": "s",
         "joint": "X",
+        "joint_g50": "*",
     }
 
     aggregate_by_method = {row["method"]: row for row in aggregate}
@@ -774,7 +834,7 @@ def create_plots(
 
     fig, (fitness_ax, ppl_ax) = plt.subplots(1, 2, figsize=(12, 4.8))
     generation_only = [row for row in convergence if row["phase"] == "generation"]
-    for method in ("depth", "quant", "joint"):
+    for method in ("depth", "quant", "joint", "joint_g50"):
         method_rows = [row for row in generation_only if row["method"] == method]
         seeds = sorted({int(row["seed"]) for row in method_rows})
         by_generation: dict[int, list[float]] = defaultdict(list)
@@ -848,6 +908,7 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     discovered = discover_run_dirs(runs_root, args.prefix)
     composition_dirs = discover_composition_dirs(runs_root, args.prefix)
+    compute_matched_dirs = discover_compute_matched_dirs(runs_root)
 
     run_rows = [dense_row(runs_root, args.prefix)]
     convergence: list[dict[str, Any]] = []
@@ -860,6 +921,12 @@ def main() -> None:
             convergence.extend(convergence_rows(method, row, generation_rows))
             candidates[method][int(row["seed"])] = candidate
             search_dirs_by_method_seed[(method, int(row["seed"]))] = run_dir
+
+    for run_dir in compute_matched_dirs:
+        row, generation_rows, candidate = search_row("joint_g50", run_dir)
+        run_rows.append(row)
+        convergence.extend(convergence_rows("joint_g50", row, generation_rows))
+        candidates["joint_g50"][int(row["seed"])] = candidate
 
     for method in ("uniform", "independent"):
         for seed, run_dir in enumerate(composition_dirs[method]):
@@ -897,7 +964,6 @@ def main() -> None:
             "runtime_seconds_cumulative",
         ),
         convergence,
-        lineterminator="\r\n",
     )
     write_csv(
         output_dir / "mistral_medium_matched_comparison.csv",
@@ -908,11 +974,15 @@ def main() -> None:
             "independent_composition_ppl",
             "joint_ppl",
             "joint_minus_independent_ppl",
+            "joint_g50_ppl",
+            "joint_g50_minus_independent_ppl",
+            "joint_g20_minus_g50_ppl",
             "independent_active_qproj_bits",
             "independent_compression_ratio",
             "joint_compression_ratio",
             "independent_source_search_minutes",
             "joint_search_minutes",
+            "joint_g50_search_minutes",
         ),
         matched_rows,
     )

@@ -1,6 +1,6 @@
 # Mistral-7B Medium Search Comparison
 
-This report is generated from the tracked artifacts for the thesis-scale medium grid. All searches use `mistralai/Mistral-7B-v0.3`, WikiText2 calibration, sequence length `1024`, `8192` calibration tokens, `20` generations, `16` offspring, `32` initial candidates, and seeds `0`, `1`, and `2`. The matched composition controls use the same final WikiText2 evaluation protocol.
+This report is generated from the tracked artifacts for the thesis-scale Mistral grid. All searches use `mistralai/Mistral-7B-v0.3`, WikiText2 calibration, sequence length `1024`, `8192` calibration tokens, `16` offspring, `32` initial candidates, and seeds `0`, `1`, and `2`. The baseline searches use `20` generations and the compute-matched joint search uses `50`. All matched controls use the same final WikiText2 evaluation protocol.
 
 ## Main comparison
 
@@ -11,7 +11,8 @@ This report is generated from the tracked artifacts for the thesis-scale medium 
 | Quant-only q_proj | 3 | 5.938 +/- 0.000 | 1.064x | 15.037 | 3.000 | 13.15 | 13.15 |
 | Depth + uniform 3-bit q_proj | 3 | 11.953 +/- 0.586 | 1.400x | 11.426 | 3.000 | 9.58 | 1.41 |
 | Independent depth + quant | 3 | 11.947 +/- 0.585 | 1.400x | 11.425 | 2.972 | 22.73 | 1.45 |
-| Joint depth + q_proj quant | 3 | 12.607 +/- 0.675 | 1.400x | 11.426 | 3.000 | 10.15 | 10.15 |
+| Joint G20 depth + q_proj quant | 3 | 12.607 +/- 0.675 | 1.400x | 11.426 | 3.000 | 10.15 | 10.15 |
+| Joint G50 compute-matched | 3 | 11.242 +/- 0.285 | 1.400x | 11.426 | 3.000 | 22.58 | 22.58 |
 
 The dense reference reaches WikiText2 PPL 5.96. Quantizing only `q_proj` preserves dense quality (mean PPL 5.938) but produces only 1.064x whole-model compression because `q_proj` is a small fraction of total model weights.
 
@@ -23,13 +24,15 @@ Uniform 3-bit `q_proj` composition reaches mean PPL 11.953. Its difference from 
 
 The runtime comparison is not equal: independent composition uses both the depth and quant searches, averaging 22.73 search minutes, or 2.24x the 10.15 minutes used by one joint search. The existing result is target-matched but not compute-matched.
 
+The compute-matched G50 joint search changes the conclusion. It reaches mean PPL 11.242, improving over G20 by 1.365 PPL and outperforming independent composition by 0.704 PPL on average. G50 is better in all three paired seeds. Its mean search runtime is 22.58 minutes versus 22.73 minutes for the independent pipeline, a difference of 0.14 minutes.
+
 ## Matched per-seed comparison
 
-| Seed | Depth-only PPL | Uniform composition PPL | Independent composition PPL | Joint PPL | Joint - independent |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 0 | 11.805 | 11.990 | 11.970 | 13.383 | +1.413 |
-| 1 | 12.445 | 12.520 | 12.520 | 12.281 | -0.239 |
-| 2 | 11.203 | 11.350 | 11.350 | 12.156 | +0.806 |
+| Seed | Depth-only | Uniform | Independent | Joint G20 | Joint G50 | G50 - independent | G20 - G50 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 11.805 | 11.990 | 11.970 | 13.383 | 11.469 | -0.501 | +1.914 |
+| 1 | 12.445 | 12.520 | 12.520 | 12.281 | 10.922 | -1.598 | +1.359 |
+| 2 | 11.203 | 11.350 | 11.350 | 12.156 | 11.336 | -0.014 | +0.820 |
 
 ## Per-seed results
 
@@ -48,9 +51,12 @@ The runtime comparison is not equal: independent composition uses both the depth
 | Independent depth + quant | 0 | 11.970 |  |  | 1.400x | 11.426 | 22.67 | 1.55 |  |
 | Independent depth + quant | 1 | 12.520 |  |  | 1.401x | 11.424 | 22.72 | 1.40 |  |
 | Independent depth + quant | 2 | 11.350 |  |  | 1.401x | 11.424 | 22.80 | 1.40 |  |
-| Joint depth + q_proj quant | 0 | 13.383 | 13.508 | 0.7939 | 1.400x | 11.426 | 10.15 | 10.15 | 20 |
-| Joint depth + q_proj quant | 1 | 12.281 | 11.922 | 0.6992 | 1.400x | 11.426 | 10.18 | 10.18 | 20 |
-| Joint depth + q_proj quant | 2 | 12.156 | 11.117 | 0.7129 | 1.400x | 11.426 | 10.12 | 10.12 | 20 |
+| Joint G20 depth + q_proj quant | 0 | 13.383 | 13.508 | 0.7939 | 1.400x | 11.426 | 10.15 | 10.15 | 20 |
+| Joint G20 depth + q_proj quant | 1 | 12.281 | 11.922 | 0.6992 | 1.400x | 11.426 | 10.18 | 10.18 | 20 |
+| Joint G20 depth + q_proj quant | 2 | 12.156 | 11.117 | 0.7129 | 1.400x | 11.426 | 10.12 | 10.12 | 20 |
+| Joint G50 compute-matched | 0 | 11.469 | 11.781 | 0.6641 | 1.400x | 11.426 | 22.47 | 22.47 | 49 |
+| Joint G50 compute-matched | 1 | 10.922 | 10.398 | 0.5591 | 1.400x | 11.426 | 22.68 | 22.68 | 50 |
+| Joint G50 compute-matched | 2 | 11.336 | 10.102 | 0.6152 | 1.400x | 11.426 | 22.60 | 22.60 | 50 |
 
 ## Seed stability
 
@@ -64,7 +70,7 @@ The runtime comparison is not equal: independent composition uses both the depth
 
 Modules selected in all three seeds (6): `model.layers.12.mlp`, `model.layers.13.mlp`, `model.layers.14.self_attn`, `model.layers.15.mlp`, `model.layers.16.self_attn`, `model.layers.28.self_attn`.
 
-### Joint depth + q_proj quant dropped-module stability
+### Joint G20 depth + q_proj quant dropped-module stability
 
 | Seed pair | Intersection | Union | Jaccard |
 | --- | ---: | ---: | ---: |
@@ -73,6 +79,16 @@ Modules selected in all three seeds (6): `model.layers.12.mlp`, `model.layers.13
 | 1 vs 2 | 7 | 25 | 0.280 |
 
 Modules selected in all three seeds (3): `model.layers.14.self_attn`, `model.layers.25.self_attn`, `model.layers.28.self_attn`.
+
+### Joint G50 compute-matched dropped-module stability
+
+| Seed pair | Intersection | Union | Jaccard |
+| --- | ---: | ---: | ---: |
+| 0 vs 1 | 8 | 24 | 0.333 |
+| 0 vs 2 | 7 | 25 | 0.280 |
+| 1 vs 2 | 10 | 22 | 0.455 |
+
+Modules selected in all three seeds (5): `model.layers.13.mlp`, `model.layers.14.self_attn`, `model.layers.22.self_attn`, `model.layers.28.self_attn`, `model.layers.9.self_attn`.
 
 ### Quantization profile stability
 
@@ -88,13 +104,13 @@ Final PPL is reasonably repeatable, but the selected depth masks are not identic
 
 ## Convergence evidence
 
-Depth and joint runs continued to accept improved parents near generation 20, and every joint run recorded its minimum search fitness at generation 20. The current budget therefore does not demonstrate full convergence. Quant-only quality was already close to dense throughout the search, although its calibration KL continued to change.
+Depth and G20 joint runs continued to accept improved parents near generation 20, and every G20 joint run recorded its minimum search fitness at generation 20. Extending to 50 generations materially improved all three seeds. Some late G50 improvements still occurred around generations 47-50, so the curves should be described as substantially improved rather than proven fully converged. Quant-only quality was already close to dense throughout its search.
 
-The generated `mistral_medium_convergence.png` shows the generation-wise search fitness and the periodic WikiText2 evaluations. Final evaluations are added at generation 20.
+The generated `mistral_medium_convergence.png` shows generation-wise search fitness and periodic WikiText2 evaluations. Final evaluations are added at each run's terminal generation.
 
 ## Hardware and measurement notes
 
-- The nine searches ran on a Tesla V100 32 GB with a 16 GB container RAM limit.
+- The twelve search runs used a Tesla V100 32 GB with a 16 GB container RAM limit.
 - Peak sampled device use was about 14.66 GB for every search.
 - Peak sampled CPU cgroup memory reached 16 GB, so CPU memory remains the binding resource and leaves little safety margin.
 - Compression ratios and model sizes are theoretical weight estimates. The current reconstruction database and runtime model remain floating point; these numbers are not measured checkpoint file sizes or inference-memory measurements.
@@ -102,18 +118,15 @@ The generated `mistral_medium_convergence.png` shows the generation-wise search 
 
 ## Interpretation for the thesis
 
-The current baseline joint search does not beat independently optimized components at the same nominal compression target. This is a useful negative result: merely placing depth and quantization variables in one candidate representation is insufficient to produce a better solution.
+At 20 generations, joint search does not beat independently optimized components at the same compression target. Once search compute is matched, the unchanged 50-generation joint search beats independent composition in every seed. This demonstrates that coupled search is beneficial, but it needs enough generations because its offspring budget is shared across two mutation subspaces.
 
-Two explanations remain open:
+The uniform and independently searched quantization controls remain nearly identical. The main quality gain therefore comes from the depth-mask search and from giving joint optimization enough time, not from the narrow `q_proj` bit-allocation search alone.
 
-1. The joint search receives less total compute because one offspring population is split between depth and quantization mutations.
-2. The current mutation operator does not explicitly model interactions between dropping an attention module and assigning bitwidth to its `q_proj` weights.
+## Next thesis contribution
 
-## Required next experiment
+Implement the planned joint-aware mutation operator behind an explicit opt-in flag. It should add budget-preserving drop-and-upgrade and restore-and-downgrade moves while retaining the current mixed mutation as the default baseline.
 
-Run the unchanged joint baseline for `50` generations and `16` offspring on seeds `0`, `1`, and `2`. Based on the measured 20-generation runtime, this should approach the independent pipeline's 22.73-minute search budget. It is the necessary compute-matched baseline because all three current joint runs achieved their best recorded fitness at generation 20.
-
-After the 50-generation baseline, implement joint-aware mutation and compare it against the unchanged 50-generation method with identical seeds and budgets. That ablation is the strongest candidate for the thesis implementation contribution.
+Ablate unchanged G50 joint search versus joint-aware G50 search with identical model, seeds, compression target, population, token schedule, and offspring count. The hypothesis is that interaction-aware moves reach equal or lower PPL in fewer generations or improve the final G50 result.
 
 ## Generated artifacts
 

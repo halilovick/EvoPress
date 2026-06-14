@@ -389,6 +389,7 @@ def mutate_quant_state(
     quant_state,
     step_size: int = 1,
     drop_state=None,
+    preferred_layer_ids=None,
 ):
     """
     Simple budget-preserving mutation:
@@ -412,7 +413,19 @@ def mutate_quant_state(
             if os.path.exists(os.path.join(quant_weights_path, layer_name, f"{level + step_size}.pth")):
                 incr_ids.append(i)
 
-        valid_pairs = [(decr_id, incr_id) for decr_id in decr_ids for incr_id in incr_ids if decr_id != incr_id]
+        valid_pairs = [
+            (decr_id, incr_id)
+            for decr_id in decr_ids
+            for incr_id in incr_ids
+            if decr_id != incr_id
+        ]
+        if preferred_layer_ids:
+            valid_pairs = [
+                (decr_id, incr_id)
+                for decr_id, incr_id in valid_pairs
+                if layer_index(group[decr_id]) in preferred_layer_ids
+                or layer_index(group[incr_id]) in preferred_layer_ids
+            ]
         if valid_pairs:
             valid_groups.append((group_id, valid_pairs))
 
@@ -427,6 +440,68 @@ def mutate_quant_state(
 
     offspring[group_id][decr_id] -= step_size
     offspring[group_id][incr_id] += step_size
+
+    return offspring
+
+
+def layer_index(layer_name: str) -> Optional[int]:
+    match = LAYER_INDEX_RE.search(layer_name)
+    return int(match.group(1)) if match is not None else None
+
+
+def mutate_joint_aware_candidate(
+    model,
+    grouped_layer_names,
+    quant_weights_path,
+    candidate,
+    target_bitwidth: float,
+    step_size: int = 1,
+    drop_entire_block: bool = False,
+):
+    """
+    Couple a depth swap with a quantization exchange involving the restored layer.
+
+    The attention drop count is unchanged: one active attention module is dropped
+    and one dropped module is restored. The active quantization budget is then
+    repaired and a same-group bitwidth exchange explicitly touches the restored
+    attention layer.
+    """
+    offspring = copy.deepcopy(candidate)
+    kept_attention = [
+        i for i, is_dropped in enumerate(offspring["drop"]["attn"]) if not is_dropped
+    ]
+    dropped_attention = [
+        i for i, is_dropped in enumerate(offspring["drop"]["attn"]) if is_dropped
+    ]
+    if not kept_attention or not dropped_attention:
+        return offspring
+
+    newly_dropped = random.choice(kept_attention)
+    newly_restored = random.choice(dropped_attention)
+    offspring["drop"]["attn"][newly_dropped] = True
+    offspring["drop"]["attn"][newly_restored] = False
+    if drop_entire_block:
+        offspring["drop"]["mlp"] = copy.deepcopy(offspring["drop"]["attn"])
+
+    offspring["quant"] = repair_active_quant_budget(
+        grouped_layer_names,
+        quant_weights_path,
+        offspring["quant"],
+        offspring["drop"],
+        target_bitwidth,
+        step_size,
+    )
+    exchanged_quant_state = mutate_quant_state(
+        model,
+        grouped_layer_names,
+        quant_weights_path,
+        offspring["quant"],
+        step_size,
+        offspring["drop"],
+        preferred_layer_ids={newly_restored},
+    )
+    if exchanged_quant_state != offspring["quant"]:
+        offspring["quant"] = exchanged_quant_state
 
     return offspring
 
@@ -458,6 +533,20 @@ def parse_args():
         "--active_quant_budget",
         action="store_true",
         help="Keep the target bit average over projections still active after depth pruning.",
+    )
+    parser.add_argument(
+        "--joint_aware_mutation",
+        action="store_true",
+        help=(
+            "Add coupled depth/quant offspring that swap an attention module and "
+            "exchange bitwidth with the newly restored layer."
+        ),
+    )
+    parser.add_argument(
+        "--joint_aware_probability",
+        default=0.5,
+        type=float,
+        help="Probability of a coupled offspring when joint-aware mutation is enabled.",
     )
 
     parser.add_argument("--fitness_fn", default="kl", choices=["ppl", "kl"])
@@ -491,6 +580,10 @@ def main():
     assert args.survivors_per_selection[-1] == 1
     if args.active_quant_budget and args.group_rule != "size":
         raise ValueError("--active_quant_budget requires --group_rule size.")
+    if args.joint_aware_mutation and not args.active_quant_budget:
+        raise ValueError("--joint_aware_mutation requires --active_quant_budget.")
+    if not 0.0 <= args.joint_aware_probability <= 1.0:
+        raise ValueError("--joint_aware_probability must be between 0 and 1.")
 
     fix_seed(args.seed)
 
@@ -664,12 +757,31 @@ def main():
             print(f"ppl_train: {ppl_train:.2f}")
 
         offspring_list = []
-        mutation_counts = {"depth": 0, "quantization": 0}
+        mutation_counts = {
+            "depth": 0,
+            "quantization": 0,
+            "joint_aware": 0,
+        }
 
         while len(offspring_list) < args.offspring:
             offspring = copy.deepcopy(parent)
 
-            if random.random() < 0.5:
+            use_joint_aware = (
+                args.joint_aware_mutation
+                and random.random() < args.joint_aware_probability
+            )
+            if use_joint_aware:
+                mutation_type = "joint_aware"
+                offspring = mutate_joint_aware_candidate(
+                    model,
+                    grouped_layer_names,
+                    args.quant_weights_path,
+                    offspring,
+                    args.target_bitwidth,
+                    args.step_size,
+                    args.drop_entire_block,
+                )
+            elif random.random() < 0.5:
                 mutation_type = "depth"
                 offspring["drop"] = mutate_drop_state(
                     offspring["drop"],
@@ -776,10 +888,19 @@ def main():
                 ],
                 "dropped_mlp_count": generation_depth_details["dropped_mlp_count"],
                 "mutation_summary": {
-                    "type": "mixed_depth_quantization",
+                    "type": (
+                        "joint_aware_depth_quantization"
+                        if args.joint_aware_mutation
+                        else "mixed_depth_quantization"
+                    ),
                     "accepted_offspring_by_type": mutation_counts,
                     "maximum_depth_mutations_per_offspring": args.max_drop_mutations,
                     "quantization_step_size": args.step_size,
+                    "joint_aware_probability": (
+                        args.joint_aware_probability
+                        if args.joint_aware_mutation
+                        else 0.0
+                    ),
                 },
                 "accepted_parent_replacement": parent != generation_parent,
                 "runtime_seconds_cumulative": reporter.runtime_seconds(),
@@ -885,6 +1006,12 @@ def main():
             "group_size": None,
             "group_rule": args.group_rule,
             "active_quant_budget": args.active_quant_budget,
+            "joint_aware_mutation": args.joint_aware_mutation,
+            "joint_aware_probability": (
+                args.joint_aware_probability
+                if args.joint_aware_mutation
+                else 0.0
+            ),
             "drop_entire_block": args.drop_entire_block,
             "quant_weights_path": args.quant_weights_path,
         },
