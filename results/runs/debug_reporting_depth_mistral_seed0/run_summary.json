@@ -1,0 +1,166 @@
+{
+  "artifacts": {
+    "candidate_path": "outputs/experiments/debug_reporting_depth_mistral_seed0/final_candidate.json",
+    "config_path": "outputs/experiments/debug_reporting_depth_mistral_seed0/layer_drop_config.txt",
+    "generation_log_path": "outputs/experiments/debug_reporting_depth_mistral_seed0/generation_log.csv",
+    "memory_samples_path": "outputs/experiments/debug_reporting_depth_mistral_seed0/memory_samples.csv",
+    "runtime_path": "outputs/experiments/debug_reporting_depth_mistral_seed0/runtime.txt",
+    "stdout_log_path": "outputs/experiments/debug_reporting_depth_mistral_seed0/run.log"
+  },
+  "compression_config": {
+    "bits_available": [],
+    "drop_entire_block": false,
+    "drop_two_consecutive": false,
+    "group_size": null,
+    "target_average_bitwidth": null,
+    "target_depth_sparsity": 0.125
+  },
+  "dataset_calibration": "wikitext2",
+  "dataset_eval": [
+    "wikitext2"
+  ],
+  "depth_statistics": {
+    "dropped_attention_count": 4,
+    "dropped_attention_layers": [
+      5,
+      16,
+      25,
+      31
+    ],
+    "dropped_attention_modules": [
+      "model.layers.5.self_attn",
+      "model.layers.16.self_attn",
+      "model.layers.25.self_attn",
+      "model.layers.31.self_attn"
+    ],
+    "dropped_mlp_count": 4,
+    "dropped_mlp_layers": [
+      13,
+      15,
+      19,
+      22
+    ],
+    "dropped_mlp_modules": [
+      "model.layers.13.mlp",
+      "model.layers.15.mlp",
+      "model.layers.19.mlp",
+      "model.layers.22.mlp"
+    ],
+    "dropped_modules": [
+      "model.layers.5.self_attn",
+      "model.layers.16.self_attn",
+      "model.layers.25.self_attn",
+      "model.layers.31.self_attn",
+      "model.layers.13.mlp",
+      "model.layers.15.mlp",
+      "model.layers.19.mlp",
+      "model.layers.22.mlp"
+    ],
+    "dropped_total_count": 8,
+    "num_attention_modules": 32,
+    "num_layers": 32,
+    "num_mlp_modules": 32
+  },
+  "final_metrics": {
+    "active_parameter_ratio": 0.8796340511670567,
+    "active_parameters": 6375608320,
+    "average_bitwidth_active": null,
+    "average_bitwidth_searched": null,
+    "average_bitwidth_total": 14.074144818672908,
+    "best_search_fitness": 0.4287109375,
+    "c4_ppl": null,
+    "dense_weight_memory_mb": 13824.5078125,
+    "estimated_compression_ratio": 1.1368363908528183,
+    "estimated_weight_memory_mb": 12160.5078125,
+    "final_calibration_kl": 0.48095703125,
+    "fineweb_ppl": null,
+    "peak_cpu_cgroup_memory_mb": 16384.0,
+    "peak_cpu_memory_mb": 16384.0,
+    "peak_cpu_memory_source": "sampled_cgroup_memory.current",
+    "peak_gpu_device_used_mb": 13240.32,
+    "peak_gpu_device_used_source": "sampled_nvidia_smi",
+    "peak_gpu_memory_mb": 13132.5986328125,
+    "peak_gpu_reserved_mb": 13162.0,
+    "peak_process_rss_mb": 7020.40234375,
+    "runtime_seconds": 1240.0,
+    "runtime_source": "launcher_wall_clock",
+    "search_process_runtime_seconds": 1229.4751904346049,
+    "total_parameters_dense": 7248023552,
+    "train_ppl": 13.4296875,
+    "wikitext2_ppl": 11.875
+  },
+  "git_commit": "21e227e6cd6a4c6d45edbd38393085b6a01c1016",
+  "launcher_finalized_at": "2026-06-10T17:56:26Z",
+  "metric_definitions": {
+    "active_parameters": "Theoretical parameters used by inference. Parameters in bypassed attention/MLP modules are excluded even though their tensors remain allocated.",
+    "average_bitwidth_active": "Parameter-weighted average over active searched weights only.",
+    "average_bitwidth_searched": "Parameter-weighted average over all searched weights, including assignments inside modules later bypassed by depth pruning.",
+    "average_bitwidth_total": "Theoretical effective bits divided by dense-model parameters. Dropped parameters contribute zero bits and active non-searched parameters use the dense dtype bitwidth.",
+    "estimated_compression_ratio": "Dense theoretical weight memory divided by estimated compressed weight memory.",
+    "peak_cpu_memory_mb": "Peak sampled container cgroup memory when memory_samples.csv is available; otherwise peak process RSS.",
+    "peak_gpu_device_used_mb": "Peak sampled total GPU device memory in use from nvidia-smi.",
+    "peak_gpu_memory_mb": "Peak tensor memory allocated by PyTorch in this process.",
+    "peak_process_rss_mb": "Peak resident set size for the Python search process.",
+    "runtime_seconds": "Launcher-measured model-command wall-clock runtime, including process startup."
+  },
+  "model_name": "mistralai/Mistral-7B-v0.3",
+  "model_size_statistics": {
+    "dense_dtype_bits": 16,
+    "dense_weight_memory_mb": 13824.5078125,
+    "estimated_compression_ratio": 1.1368363908528183,
+    "estimated_weight_memory_mb": 12160.5078125,
+    "model_size_note": "The estimated model size is theoretical and based on assigned bitwidths. It does not represent the on-disk size of the current floating-point reconstruction database.",
+    "nonsearched_weight_memory_mb": 12160.5078125,
+    "searched_weight_memory_mb": 0.0
+  },
+  "parameter_statistics": {
+    "active_nonsearched_parameters": 6375608320,
+    "active_parameter_ratio": 0.8796340511670567,
+    "active_parameters": 6375608320,
+    "active_parameters_note": "Theoretical parameters used by inference. Parameters in bypassed attention/MLP modules are excluded even though their tensors remain allocated.",
+    "dropped_parameters": 872415232,
+    "nonsearched_parameters": 7248023552,
+    "searched_parameters_active": 0,
+    "searched_parameters_dense": 0,
+    "total_parameters_dense": 7248023552
+  },
+  "quantization_statistics": {
+    "active_quantized_module_count": 0,
+    "average_bitwidth_active": null,
+    "average_bitwidth_by_projection_type": {},
+    "average_bitwidth_searched": null,
+    "average_bitwidth_total": 14.074144818672908,
+    "bitwidth_by_module": {},
+    "bitwidth_histogram": {},
+    "bitwidth_parameter_histogram": {},
+    "quantized_module_count": 0
+  },
+  "run_name": "debug_reporting_depth_mistral_seed0",
+  "schema_version": 2,
+  "search_config": {
+    "calibration_tokens": 1024,
+    "eval_every": 1,
+    "eval_tokens": 524288,
+    "eval_tokens_loaded_by_dataset": {
+      "wikitext2": 334336
+    },
+    "fitness_fn": "kl",
+    "generations": 2,
+    "initial_candidates": 2,
+    "initial_tokens": 128,
+    "offspring": 2,
+    "seed": 0,
+    "selection_survivors": [
+      2,
+      1
+    ],
+    "selection_tokens": [
+      128,
+      512
+    ],
+    "sequence_length": 512
+  },
+  "search_type": "depth_only",
+  "timestamp_end": "2026-06-10T17:56:24Z",
+  "timestamp_start": "2026-06-10T17:35:54Z"
+}
