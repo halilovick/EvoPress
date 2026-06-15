@@ -42,6 +42,7 @@ GENERATION_COLUMNS = [
     "dropped_attention_count",
     "dropped_mlp_count",
     "mutation_summary",
+    "selected_parent_mutation_type",
     "accepted_parent_replacement",
     "runtime_seconds_cumulative",
     "peak_gpu_memory_mb",

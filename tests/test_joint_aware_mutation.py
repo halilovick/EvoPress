@@ -3,7 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from evo_joint_search import candidate_bits, mutate_joint_aware_candidate
+from evo_joint_search import (
+    candidate_bits,
+    mutate_joint_aware_candidate,
+    selected_candidate_metadata,
+)
 
 
 class FakeWeight:
@@ -25,6 +29,29 @@ class FakeModel:
 
 
 class JointAwareMutationTest(unittest.TestCase):
+    def test_selected_candidate_metadata_follows_survivors(self) -> None:
+        candidates = [
+            {"drop": {"attn": [False]}, "quant": [[2]]},
+            {"drop": {"attn": [True]}, "quant": [[3]]},
+            {"drop": {"attn": [False]}, "quant": [[4]]},
+        ]
+        mutation_types = ["depth", "joint_aware", "quantization"]
+
+        selected = [candidates[2], candidates[0]]
+
+        self.assertEqual(
+            selected_candidate_metadata(
+                selected,
+                candidates,
+                mutation_types,
+            ),
+            ["quantization", "depth"],
+        )
+
+    def test_selected_candidate_metadata_rejects_misaligned_input(self) -> None:
+        with self.assertRaisesRegex(ValueError, "equal lengths"):
+            selected_candidate_metadata([{"candidate": 1}], [], ["depth"])
+
     def test_coupled_mutation_preserves_budgets_and_touches_restored_layer(self) -> None:
         layer_names = [
             f"model.layers.{layer_id}.self_attn.q_proj"

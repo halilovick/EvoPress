@@ -1,6 +1,6 @@
 # Mistral-7B Medium Search Comparison
 
-This report is generated from the tracked artifacts for the thesis-scale Mistral grid. All searches use `mistralai/Mistral-7B-v0.3`, WikiText2 calibration, sequence length `1024`, `8192` calibration tokens, `16` offspring, `32` initial candidates, and seeds `0`, `1`, and `2`. The baseline searches use `20` generations and the compute-matched joint search uses `50`. All matched controls use the same final WikiText2 evaluation protocol.
+This report is generated from the tracked artifacts for the thesis-scale Mistral grid. All searches use `mistralai/Mistral-7B-v0.3`, WikiText2 calibration, sequence length `1024`, `8192` calibration tokens, `16` offspring, `32` initial candidates, and seeds `0`, `1`, and `2`. The baseline searches use `20` generations; the compute-matched unchanged and joint-aware searches use `50`. All matched controls use the same final WikiText2 evaluation protocol.
 
 ## Main comparison
 
@@ -13,6 +13,7 @@ This report is generated from the tracked artifacts for the thesis-scale Mistral
 | Independent depth + quant | 3 | 11.947 +/- 0.585 | 1.400x | 11.425 | 2.972 | 22.73 | 1.45 |
 | Joint G20 depth + q_proj quant | 3 | 12.607 +/- 0.675 | 1.400x | 11.426 | 3.000 | 10.15 | 10.15 |
 | Joint G50 compute-matched | 3 | 11.242 +/- 0.285 | 1.400x | 11.426 | 3.000 | 22.58 | 22.58 |
+| Joint-aware G50 (p=0.5) | 3 | 11.547 +/- 0.617 | 1.400x | 11.426 | 3.000 | 26.43 | 26.43 |
 
 The dense reference reaches WikiText2 PPL 5.96. Quantizing only `q_proj` preserves dense quality (mean PPL 5.938) but produces only 1.064x whole-model compression because `q_proj` is a small fraction of total model weights.
 
@@ -26,13 +27,15 @@ The runtime comparison is not equal: independent composition uses both the depth
 
 The compute-matched G50 joint search changes the conclusion. It reaches mean PPL 11.242, improving over G20 by 1.365 PPL and outperforming independent composition by 0.704 PPL on average. G50 is better in all three paired seeds. Its mean search runtime is 22.58 minutes versus 22.73 minutes for the independent pipeline, a difference of 0.14 minutes.
 
+The first joint-aware mutation ablation does not improve the unchanged G50 search. At the same target and nominal search budget, joint-aware mutation reaches mean PPL 11.547 +/- 0.617, compared with 11.242 +/- 0.285 for the baseline. The paired mean difference `joint-aware - baseline` is +0.305 PPL; joint-aware wins in 1 of 3 seeds. This is useful negative evidence: coupling every proposed depth exchange to a bit-budget exchange with probability `0.5` did not produce a better search operator.
+
 ## Matched per-seed comparison
 
-| Seed | Depth-only | Uniform | Independent | Joint G20 | Joint G50 | G50 - independent | G20 - G50 |
+| Seed | Depth-only | Uniform | Independent | Joint G20 | Joint G50 | Joint-aware G50 | Aware - G50 |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 0 | 11.805 | 11.990 | 11.970 | 13.383 | 11.469 | -0.501 | +1.914 |
-| 1 | 12.445 | 12.520 | 12.520 | 12.281 | 10.922 | -1.598 | +1.359 |
-| 2 | 11.203 | 11.350 | 11.350 | 12.156 | 11.336 | -0.014 | +0.820 |
+| 0 | 11.805 | 11.990 | 11.970 | 13.383 | 11.469 | 11.156 | -0.312 |
+| 1 | 12.445 | 12.520 | 12.520 | 12.281 | 10.922 | 11.227 | +0.305 |
+| 2 | 11.203 | 11.350 | 11.350 | 12.156 | 11.336 | 12.258 | +0.922 |
 
 ## Per-seed results
 
@@ -57,6 +60,9 @@ The compute-matched G50 joint search changes the conclusion. It reaches mean PPL
 | Joint G50 compute-matched | 0 | 11.469 | 11.781 | 0.6641 | 1.400x | 11.426 | 22.47 | 22.47 | 49 |
 | Joint G50 compute-matched | 1 | 10.922 | 10.398 | 0.5591 | 1.400x | 11.426 | 22.68 | 22.68 | 50 |
 | Joint G50 compute-matched | 2 | 11.336 | 10.102 | 0.6152 | 1.400x | 11.426 | 22.60 | 22.60 | 50 |
+| Joint-aware G50 (p=0.5) | 0 | 11.156 | 11.555 | 0.6357 | 1.400x | 11.426 | 23.37 | 23.37 | 47 |
+| Joint-aware G50 (p=0.5) | 1 | 11.227 | 10.898 | 0.6025 | 1.400x | 11.426 | 23.47 | 23.47 | 45 |
+| Joint-aware G50 (p=0.5) | 2 | 12.258 | 11.070 | 0.7227 | 1.400x | 11.426 | 32.47 | 32.47 | 50 |
 
 ## Seed stability
 
@@ -90,6 +96,16 @@ Modules selected in all three seeds (3): `model.layers.14.self_attn`, `model.lay
 
 Modules selected in all three seeds (5): `model.layers.13.mlp`, `model.layers.14.self_attn`, `model.layers.22.self_attn`, `model.layers.28.self_attn`, `model.layers.9.self_attn`.
 
+### Joint-aware G50 (p=0.5) dropped-module stability
+
+| Seed pair | Intersection | Union | Jaccard |
+| --- | ---: | ---: | ---: |
+| 0 vs 1 | 9 | 23 | 0.391 |
+| 0 vs 2 | 6 | 26 | 0.231 |
+| 1 vs 2 | 7 | 25 | 0.280 |
+
+Modules selected in all three seeds (5): `model.layers.13.mlp`, `model.layers.14.self_attn`, `model.layers.22.self_attn`, `model.layers.23.self_attn`, `model.layers.28.self_attn`.
+
 ### Quantization profile stability
 
 | Seed | 2-bit modules | 3-bit modules | 4-bit modules |
@@ -104,14 +120,14 @@ Final PPL is reasonably repeatable, but the selected depth masks are not identic
 
 ## Convergence evidence
 
-Depth and G20 joint runs continued to accept improved parents near generation 20, and every G20 joint run recorded its minimum search fitness at generation 20. Extending to 50 generations materially improved all three seeds. Some late G50 improvements still occurred around generations 47-50, so the curves should be described as substantially improved rather than proven fully converged. Quant-only quality was already close to dense throughout its search.
+Depth and G20 joint runs continued to accept improved parents near generation 20, and every G20 joint run recorded its minimum search fitness at generation 20. Extending the unchanged search to 50 generations materially improved all three seeds. Some late G50 improvements still occurred around generations 47-50, so the curves should be described as substantially improved rather than proven fully converged. The joint-aware runs also continued improving late, but their final distribution was worse and more variable than the unchanged G50 baseline. Quant-only quality was already close to dense throughout its search.
 
 The generated `mistral_medium_convergence.png` shows generation-wise search fitness and periodic WikiText2 evaluations. Final evaluations are added at each run's terminal generation.
 
 ## Hardware and measurement notes
 
-- The twelve search runs used a Tesla V100 32 GB with a 16 GB container RAM limit.
-- Peak sampled device use was about 14.66 GB for every search.
+- The runs were executed across restarted TU Wien Datalab sessions, where accelerator availability can vary. Runtime comparisons should therefore prioritize matched settings and be interpreted cautiously.
+- The unchanged G50 runs averaged about 22.58 minutes. Joint-aware seeds 0 and 1 took about 23.4 minutes, while seed 2 took 32.5 minutes and reported 29.3 GB sampled device use; this makes the aggregate joint-aware runtime unsuitable as a clean operator-overhead estimate.
 - Peak sampled CPU cgroup memory reached 16 GB, so CPU memory remains the binding resource and leaves little safety margin.
 - Compression ratios and model sizes are theoretical weight estimates. The current reconstruction database and runtime model remain floating point; these numbers are not measured checkpoint file sizes or inference-memory measurements.
 - Results currently cover WikiText2 only. C4, FineWeb-Edu, and downstream task evaluation remain necessary for broader claims.
@@ -120,19 +136,20 @@ The generated `mistral_medium_convergence.png` shows generation-wise search fitn
 
 At 20 generations, joint search does not beat independently optimized components at the same compression target. Once search compute is matched, the unchanged 50-generation joint search beats independent composition in every seed. This demonstrates that coupled search is beneficial, but it needs enough generations because its offspring budget is shared across two mutation subspaces.
 
-The uniform and independently searched quantization controls remain nearly identical. The main quality gain therefore comes from the depth-mask search and from giving joint optimization enough time, not from the narrow `q_proj` bit-allocation search alone.
+The joint-aware ablation narrows the method claim. A simple interaction-aware mutation is not automatically better: the `p=0.5` operator worsens mean PPL by 0.305 and doubles the sample standard deviation relative to unchanged G50. The thesis contribution should distinguish the demonstrated benefit of sufficient joint search compute from the unsupported claim that this first coupled mutation design improves search.
 
 ## Next thesis contribution
 
-Implement the planned joint-aware mutation operator behind an explicit opt-in flag. It should add budget-preserving drop-and-upgrade and restore-and-downgrade moves while retaining the current mixed mutation as the default baseline.
+Keep the unchanged G50 method as the current primary result. Before another expensive run, extend the structured logs to record the mutation type that produced the selected parent, rather than only the number of generated offspring of each type. This will show whether joint-aware offspring are actually selected and whether their utility changes over generations.
 
-Ablate unchanged G50 joint search versus joint-aware G50 search with identical model, seeds, compression target, population, token schedule, and offspring count. The hypothesis is that interaction-aware moves reach equal or lower PPL in fewer generations or improve the final G50 result.
+Then run a bounded probability ablation, starting with `joint_aware_probability=0.25` rather than repeating `0.5`. A lower probability preserves more of the successful baseline exploration while testing whether occasional coupled moves help. Promote it to a three-seed G50 comparison only if a cheaper G20 screening run shows a consistent signal.
 
 ## Generated artifacts
 
 - `results/mistral_medium_runs.csv`: one row per run.
 - `results/mistral_medium_aggregate.csv`: method-level mean and sample standard deviation.
 - `results/mistral_medium_matched_comparison.csv`: paired seed-level comparison of depth, uniform, independent, and joint configurations.
+- `results/mistral_joint_aware_ablation.csv`: paired unchanged-G50 versus joint-aware-G50 results, runtimes, and generated mutation counts.
 - `results/mistral_medium_convergence.csv`: generation-wise search and evaluation metrics.
 - `results/mistral_medium_quality_compression.png`: quality-compression tradeoff.
 - `results/mistral_medium_convergence.png`: search convergence.

@@ -184,6 +184,30 @@ def selection(
     return [candidates[i] for i in best_ids], [fitnesses[i] for i in best_ids]
 
 
+def selected_candidate_metadata(
+    selected_candidates,
+    candidate_pool,
+    metadata,
+):
+    if len(candidate_pool) != len(metadata):
+        raise ValueError("Candidate pool and metadata must have equal lengths.")
+
+    selected_metadata = []
+    for selected_candidate in selected_candidates:
+        matches = [
+            index
+            for index, candidate in enumerate(candidate_pool)
+            if candidate == selected_candidate
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "Each selected candidate must match exactly one candidate in "
+                "the source pool."
+            )
+        selected_metadata.append(metadata[matches[0]])
+    return selected_metadata
+
+
 def make_random_drop_state(num_blocks: int, blocks_to_remove: int, drop_entire_block: bool):
     removed_state = {
         "attn": [False] * num_blocks,
@@ -757,6 +781,7 @@ def main():
             print(f"ppl_train: {ppl_train:.2f}")
 
         offspring_list = []
+        offspring_mutation_types = []
         mutation_counts = {
             "depth": 0,
             "quantization": 0,
@@ -812,13 +837,17 @@ def main():
                 continue
 
             offspring_list.append(offspring)
+            offspring_mutation_types.append(mutation_type)
             mutation_counts[mutation_type] += 1
 
         for num_survive, num_tokens in zip(args.survivors_per_selection, args.tokens_per_selection):
             if num_survive == args.survivors_per_selection[-1]:
                 if parent not in offspring_list:
                     offspring_list.append(parent)
+                    offspring_mutation_types.append("parent")
 
+            candidate_pool = offspring_list
+            mutation_type_pool = offspring_mutation_types
             offspring_list, train_fitnesses = selection(
                 model=model,
                 layers=layers,
@@ -831,9 +860,15 @@ def main():
                 fitness_fn=args.fitness_fn,
                 target_logits=target_logits,
             )
+            offspring_mutation_types = selected_candidate_metadata(
+                offspring_list,
+                candidate_pool,
+                mutation_type_pool,
+            )
 
         parent = offspring_list[0]
         train_fitness = train_fitnesses[0]
+        selected_parent_mutation_type = offspring_mutation_types[0]
 
         generation_depth_details = build_depth_details(
             attention_module_names,
@@ -893,7 +928,7 @@ def main():
                         if args.joint_aware_mutation
                         else "mixed_depth_quantization"
                     ),
-                    "accepted_offspring_by_type": mutation_counts,
+                    "generated_offspring_by_type": mutation_counts,
                     "maximum_depth_mutations_per_offspring": args.max_drop_mutations,
                     "quantization_step_size": args.step_size,
                     "joint_aware_probability": (
@@ -902,6 +937,9 @@ def main():
                         else 0.0
                     ),
                 },
+                "selected_parent_mutation_type": (
+                    selected_parent_mutation_type
+                ),
                 "accepted_parent_replacement": parent != generation_parent,
                 "runtime_seconds_cumulative": reporter.runtime_seconds(),
                 "peak_gpu_memory_mb": peak_gpu_memory()[0],

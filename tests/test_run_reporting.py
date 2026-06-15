@@ -1,3 +1,4 @@
+import csv
 import json
 import subprocess
 import sys
@@ -116,6 +117,7 @@ class RunReportingTest(unittest.TestCase):
                     "dropped_attention_count": 1,
                     "dropped_mlp_count": 0,
                     "mutation_summary": {"depth": 1, "quantization": 1},
+                    "selected_parent_mutation_type": "joint_aware",
                     "accepted_parent_replacement": True,
                     "runtime_seconds_cumulative": 1.0,
                     "peak_gpu_memory_mb": None,
@@ -233,6 +235,14 @@ class RunReportingTest(unittest.TestCase):
             self.assertNotEqual(
                 summary["final_metrics"]["search_process_runtime_seconds"],
                 summary["final_metrics"]["runtime_seconds"],
+            )
+            with (run_dir / "generation_log.csv").open(
+                newline="", encoding="utf-8"
+            ) as handle:
+                generation_rows = list(csv.DictReader(handle))
+            self.assertEqual(
+                generation_rows[0]["selected_parent_mutation_type"],
+                "joint_aware",
             )
 
             result = subprocess.run(
