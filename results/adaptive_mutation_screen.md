@@ -1,23 +1,32 @@
 # TinyLlama Adaptive Mutation Screen
 
-This matched screen compares the existing joint search with an adaptive mutation-strength variant. Both use TinyLlama, WikiText2, 12.5% depth sparsity, an active 3-bit `q_proj` budget, 20 generations, 8 offspring, and seeds 0-2. Adaptive mode starts at strength 1, increases after three retained-parent generations, and caps at strength 3.
+This matched ablation compares the existing joint search, adaptive mutation strength, and a fixed strength-1 control. All runs use TinyLlama, WikiText2, 12.5% depth sparsity, an active 3-bit `q_proj` budget, 20 generations, 8 offspring, and seeds 0-2.
 
 ## Result
 
 | Variant | Seeds | WikiText2 PPL mean +/- SD | Final KL mean +/- SD | Runtime mean |
 | --- | ---: | ---: | ---: | ---: |
-| Default mutation | 3 | 11.247 +/- 0.268 | 0.2607 +/- 0.0191 | 212.3 s |
+| Default mutation (max 3) | 3 | 11.247 +/- 0.268 | 0.2607 +/- 0.0191 | 212.3 s |
 | Adaptive mutation (patience 3, max 3) | 3 | 10.987 +/- 0.058 | 0.2351 +/- 0.0163 | 208.7 s |
+| Fixed local mutation (strength 1) | 3 | 10.971 +/- 0.055 | 0.2347 +/- 0.0166 | 211.0 s |
 
-The paired mean difference `adaptive - baseline` is -0.260 PPL with sample SD 0.292. Adaptive mode wins 2 of 3 seeds, reduces PPL variance, and changes mean final calibration KL by -0.0256.
+Adaptive mode changes mean PPL by -0.260 versus the default and wins 2 of 3 seeds. Fixed strength 1 changes mean PPL by -0.276 and wins 2 of 3 seeds. The mean `adaptive - fixed` difference is +0.016 PPL.
 
 ## Paired seeds
 
-| Seed | Baseline PPL | Adaptive PPL | PPL delta | Baseline KL | Adaptive KL | KL delta | Elevated generations | Elevated replacements |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 0 | 11.289 | 10.922 | -0.367 | 0.2805 | 0.2229 | -0.0576 | 0 | 0 |
-| 1 | 10.961 | 11.031 | +0.070 | 0.2423 | 0.2537 | +0.0114 | 0 | 0 |
-| 2 | 11.492 | 11.008 | -0.484 | 0.2593 | 0.2289 | -0.0304 | 6 | 0 |
+| Seed | Default PPL | Adaptive PPL | Fixed-1 PPL | Adaptive - default | Fixed-1 - default | Adaptive - fixed-1 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 11.289 | 10.922 | 10.922 | -0.367 | -0.367 | +0.000 |
+| 1 | 10.961 | 11.031 | 11.031 | +0.070 | +0.070 | +0.000 |
+| 2 | 11.492 | 11.008 | 10.961 | -0.484 | -0.531 | +0.047 |
+
+## Calibration objective
+
+| Variant | Final KL mean +/- SD | Mean delta from default |
+| --- | ---: | ---: |
+| Default mutation (max 3) | 0.2607 +/- 0.0191 | - |
+| Adaptive mutation (patience 3, max 3) | 0.2351 +/- 0.0163 | -0.0256 |
+| Fixed local mutation (strength 1) | 0.2347 +/- 0.0166 | -0.0260 |
 
 ## Strength schedule
 
@@ -31,15 +40,15 @@ The paired mean difference `adaptive - baseline` is -0.260 PPL with sample SD 0.
 
 Elevated strengths were active for 6 generation(s), all in seed 2. They produced 0 accepted replacement(s). Seeds 0 and 1 stayed at strength 1 for all generations. Therefore the improved aggregate result cannot be attributed to escalation; the final candidates were selected entirely under strength-1 behavior.
 
-The current comparison is also not a pure scheduling ablation. The existing baseline permits up to three depth swaps from the start, while adaptive mode begins with exactly one. The result may indicate that smaller local mutations are better, not that increasing strength after stagnation is beneficial.
+The fixed-strength control resolves the earlier attribution problem. Seeds 0 and 1 produced byte-identical final candidates under adaptive and fixed-strength modes. Seed 2 used elevated adaptive strengths for six generations but accepted no elevated-strength replacement; fixed strength 1 was slightly better by 0.047 PPL.
 
 ## Decision
 
-Do not promote adaptive scheduling directly to Mistral yet. The quality signal is stronger than the joint-aware probability screen, but attribution is unresolved. Run a fixed-strength-1 control with the same three seeds. If fixed strength 1 reproduces the gain, the contribution is mutation locality. If adaptive mode beats fixed strength 1, escalation has evidence and can advance.
+The supported contribution is mutation locality, not adaptive escalation. A single depth swap per mutation improved mean PPL and substantially reduced variance relative to allowing up to three swaps. Promote fixed strength 1 to a matched Mistral ablation. Do not spend Mistral compute on the current adaptive schedule unless a future design makes elevated mutations demonstrably useful.
 
 ## Generated artifacts
 
-- `results/adaptive_mutation_screen.csv`: paired final metrics.
+- `results/adaptive_mutation_screen.csv`: three-way paired final metrics.
 - `results/adaptive_mutation_strengths.csv`: per-seed strength usage and selected mutations.
 - `results/adaptive_mutation_convergence.csv`: generation-wise quality, strength, and provenance.
 - `results/adaptive_mutation_screen.png`: paired final PPL and convergence.

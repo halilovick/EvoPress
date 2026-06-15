@@ -25,6 +25,13 @@ class AdaptiveMutationSummaryTest(unittest.TestCase):
                         "elevated_strength_generations": seed,
                         "elevated_strength_replacements": 0,
                     },
+                    {
+                        "variant": "fixed",
+                        "seed": seed,
+                        "wikitext2_ppl": 10.4 + seed,
+                        "final_calibration_kl": 0.19 + seed,
+                        "runtime_seconds": 99 + seed,
+                    },
                 ]
             )
 
@@ -35,7 +42,16 @@ class AdaptiveMutationSummaryTest(unittest.TestCase):
             paired[0]["adaptive_minus_baseline_ppl"], -0.5
         )
         self.assertAlmostEqual(
+            paired[0]["fixed_minus_baseline_ppl"], -0.6
+        )
+        self.assertAlmostEqual(
+            paired[0]["adaptive_minus_fixed_ppl"], 0.1
+        )
+        self.assertAlmostEqual(
             paired[0]["adaptive_minus_baseline_kl"], -0.1
+        )
+        self.assertAlmostEqual(
+            paired[0]["fixed_minus_baseline_kl"], -0.11
         )
         self.assertEqual(
             paired[0]["adaptive_minus_baseline_runtime_seconds"], -2

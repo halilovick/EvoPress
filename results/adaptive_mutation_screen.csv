@@ -1,4 +1,4 @@
-seed,baseline_wikitext2_ppl,adaptive_wikitext2_ppl,adaptive_minus_baseline_ppl,baseline_final_calibration_kl,adaptive_final_calibration_kl,adaptive_minus_baseline_kl,baseline_runtime_seconds,adaptive_runtime_seconds,adaptive_minus_baseline_runtime_seconds,elevated_strength_generations,elevated_strength_replacements
-0,11.2890625,10.921875,-0.3671875,0.280517578125,0.222900390625,-0.0576171875,218.0,209.0,-9.0,0,0
-1,10.9609375,11.03125,0.0703125,0.2423095703125,0.253662109375,0.0113525390625,208.0,208.0,0.0,0,0
-2,11.4921875,11.0078125,-0.484375,0.25927734375,0.2288818359375,-0.0303955078125,211.0,209.0,-2.0,6,0
+seed,baseline_wikitext2_ppl,adaptive_wikitext2_ppl,fixed_wikitext2_ppl,adaptive_minus_baseline_ppl,fixed_minus_baseline_ppl,adaptive_minus_fixed_ppl,baseline_final_calibration_kl,adaptive_final_calibration_kl,fixed_final_calibration_kl,adaptive_minus_baseline_kl,fixed_minus_baseline_kl,adaptive_minus_fixed_kl,baseline_runtime_seconds,adaptive_runtime_seconds,fixed_runtime_seconds,adaptive_minus_baseline_runtime_seconds,fixed_minus_baseline_runtime_seconds,elevated_strength_generations,elevated_strength_replacements
+0,11.2890625,10.921875,10.921875,-0.3671875,-0.3671875,0.0,0.280517578125,0.222900390625,0.222900390625,-0.0576171875,-0.0576171875,0.0,218.0,209.0,212.0,-9.0,-6.0,0,0
+1,10.9609375,11.03125,11.03125,0.0703125,0.0703125,0.0,0.2423095703125,0.253662109375,0.253662109375,0.0113525390625,0.0113525390625,0.0,208.0,208.0,209.0,0.0,1.0,0,0
+2,11.4921875,11.0078125,10.9609375,-0.484375,-0.53125,0.046875,0.25927734375,0.2288818359375,0.2276611328125,-0.0303955078125,-0.0316162109375,0.001220703125,211.0,209.0,212.0,-2.0,1.0,6,0

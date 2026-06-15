@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import Any
 
 
-VARIANTS = ("baseline", "adaptive")
+VARIANTS = ("baseline", "adaptive", "fixed")
 LABELS = {
-    "baseline": "Default mutation",
+    "baseline": "Default mutation (max 3)",
     "adaptive": "Adaptive mutation (patience 3, max 3)",
+    "fixed": "Fixed local mutation (strength 1)",
 }
 
 
@@ -71,6 +72,7 @@ def discover(runs_root: Path) -> dict[str, dict[int, Path]]:
         "adaptive": (
             "screen_adaptive_tiny_pat3_max3_g20_o8_seed{seed}"
         ),
+        "fixed": "screen_fixedstrength_tiny_max1_g20_o8_seed{seed}",
     }
     for variant, template in names.items():
         for seed in (0, 1, 2):
@@ -110,6 +112,12 @@ def load_run(
         variant == "adaptive"
     ):
         raise SystemExit(f"Unexpected adaptive setting in {run_dir}.")
+    expected_strength = 1 if variant == "fixed" else 3
+    command = (run_dir / "command.sh").read_text(encoding="utf-8")
+    if f"--max_drop_mutations {expected_strength}" not in command:
+        raise SystemExit(
+            f"Unexpected maximum mutation strength in {run_dir}."
+        )
     if len(generations) != 20:
         raise SystemExit(f"Expected 20 generations in {run_dir}.")
 
@@ -251,14 +259,24 @@ def paired_rows(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for seed in (0, 1, 2):
         baseline = by_key[("baseline", seed)]
         adaptive = by_key[("adaptive", seed)]
+        fixed = by_key[("fixed", seed)]
         output.append(
             {
                 "seed": seed,
                 "baseline_wikitext2_ppl": baseline["wikitext2_ppl"],
                 "adaptive_wikitext2_ppl": adaptive["wikitext2_ppl"],
+                "fixed_wikitext2_ppl": fixed["wikitext2_ppl"],
                 "adaptive_minus_baseline_ppl": (
                     adaptive["wikitext2_ppl"]
                     - baseline["wikitext2_ppl"]
+                ),
+                "fixed_minus_baseline_ppl": (
+                    fixed["wikitext2_ppl"]
+                    - baseline["wikitext2_ppl"]
+                ),
+                "adaptive_minus_fixed_ppl": (
+                    adaptive["wikitext2_ppl"]
+                    - fixed["wikitext2_ppl"]
                 ),
                 "baseline_final_calibration_kl": baseline[
                     "final_calibration_kl"
@@ -266,14 +284,30 @@ def paired_rows(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "adaptive_final_calibration_kl": adaptive[
                     "final_calibration_kl"
                 ],
+                "fixed_final_calibration_kl": fixed[
+                    "final_calibration_kl"
+                ],
                 "adaptive_minus_baseline_kl": (
                     adaptive["final_calibration_kl"]
                     - baseline["final_calibration_kl"]
                 ),
+                "fixed_minus_baseline_kl": (
+                    fixed["final_calibration_kl"]
+                    - baseline["final_calibration_kl"]
+                ),
+                "adaptive_minus_fixed_kl": (
+                    adaptive["final_calibration_kl"]
+                    - fixed["final_calibration_kl"]
+                ),
                 "baseline_runtime_seconds": baseline["runtime_seconds"],
                 "adaptive_runtime_seconds": adaptive["runtime_seconds"],
+                "fixed_runtime_seconds": fixed["runtime_seconds"],
                 "adaptive_minus_baseline_runtime_seconds": (
                     adaptive["runtime_seconds"]
+                    - baseline["runtime_seconds"]
+                ),
+                "fixed_minus_baseline_runtime_seconds": (
+                    fixed["runtime_seconds"]
                     - baseline["runtime_seconds"]
                 ),
                 "elevated_strength_generations": adaptive[
@@ -298,21 +332,36 @@ def build_markdown(
     adaptive = [
         row for row in run_rows if row["variant"] == "adaptive"
     ]
+    fixed = [row for row in run_rows if row["variant"] == "fixed"]
     baseline_ppl = [float(row["wikitext2_ppl"]) for row in baseline]
     adaptive_ppl = [float(row["wikitext2_ppl"]) for row in adaptive]
+    fixed_ppl = [float(row["wikitext2_ppl"]) for row in fixed]
     baseline_kl = [
         float(row["final_calibration_kl"]) for row in baseline
     ]
     adaptive_kl = [
         float(row["final_calibration_kl"]) for row in adaptive
     ]
-    ppl_deltas = [
+    fixed_kl = [
+        float(row["final_calibration_kl"]) for row in fixed
+    ]
+    adaptive_ppl_deltas = [
         float(row["adaptive_minus_baseline_ppl"]) for row in pairs
     ]
-    kl_deltas = [
+    fixed_ppl_deltas = [
+        float(row["fixed_minus_baseline_ppl"]) for row in pairs
+    ]
+    adaptive_fixed_ppl_deltas = [
+        float(row["adaptive_minus_fixed_ppl"]) for row in pairs
+    ]
+    adaptive_kl_deltas = [
         float(row["adaptive_minus_baseline_kl"]) for row in pairs
     ]
-    wins = sum(delta < 0 for delta in ppl_deltas)
+    fixed_kl_deltas = [
+        float(row["fixed_minus_baseline_kl"]) for row in pairs
+    ]
+    adaptive_wins = sum(delta < 0 for delta in adaptive_ppl_deltas)
+    fixed_wins = sum(delta < 0 for delta in fixed_ppl_deltas)
     elevated_generations = sum(
         int(row["elevated_strength_generations"]) for row in adaptive
     )
@@ -323,7 +372,7 @@ def build_markdown(
     lines = [
         "# TinyLlama Adaptive Mutation Screen",
         "",
-        "This matched screen compares the existing joint search with an adaptive mutation-strength variant. Both use TinyLlama, WikiText2, 12.5% depth sparsity, an active 3-bit `q_proj` budget, 20 generations, 8 offspring, and seeds 0-2. Adaptive mode starts at strength 1, increases after three retained-parent generations, and caps at strength 3.",
+        "This matched ablation compares the existing joint search, adaptive mutation strength, and a fixed strength-1 control. All runs use TinyLlama, WikiText2, 12.5% depth sparsity, an active 3-bit `q_proj` budget, 20 generations, 8 offspring, and seeds 0-2.",
         "",
         "## Result",
         "",
@@ -331,28 +380,35 @@ def build_markdown(
         "| --- | ---: | ---: | ---: | ---: |",
         f"| {LABELS['baseline']} | 3 | {mean(baseline_ppl):.3f} +/- {sample_std(baseline_ppl):.3f} | {mean(baseline_kl):.4f} +/- {sample_std(baseline_kl):.4f} | {mean([float(row['runtime_seconds']) for row in baseline]):.1f} s |",
         f"| {LABELS['adaptive']} | 3 | {mean(adaptive_ppl):.3f} +/- {sample_std(adaptive_ppl):.3f} | {mean(adaptive_kl):.4f} +/- {sample_std(adaptive_kl):.4f} | {mean([float(row['runtime_seconds']) for row in adaptive]):.1f} s |",
+        f"| {LABELS['fixed']} | 3 | {mean(fixed_ppl):.3f} +/- {sample_std(fixed_ppl):.3f} | {mean(fixed_kl):.4f} +/- {sample_std(fixed_kl):.4f} | {mean([float(row['runtime_seconds']) for row in fixed]):.1f} s |",
         "",
-        f"The paired mean difference `adaptive - baseline` is {mean(ppl_deltas):+.3f} PPL with sample SD {sample_std(ppl_deltas):.3f}. Adaptive mode wins {wins} of 3 seeds, reduces PPL variance, and changes mean final calibration KL by {mean(kl_deltas):+.4f}.",
+        f"Adaptive mode changes mean PPL by {mean(adaptive_ppl_deltas):+.3f} versus the default and wins {adaptive_wins} of 3 seeds. Fixed strength 1 changes mean PPL by {mean(fixed_ppl_deltas):+.3f} and wins {fixed_wins} of 3 seeds. The mean `adaptive - fixed` difference is {mean(adaptive_fixed_ppl_deltas):+.3f} PPL.",
         "",
         "## Paired seeds",
         "",
-        "| Seed | Baseline PPL | Adaptive PPL | PPL delta | Baseline KL | Adaptive KL | KL delta | Elevated generations | Elevated replacements |",
-        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Seed | Default PPL | Adaptive PPL | Fixed-1 PPL | Adaptive - default | Fixed-1 - default | Adaptive - fixed-1 |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in pairs:
         lines.append(
             f"| {row['seed']} | {row['baseline_wikitext2_ppl']:.3f} | "
             f"{row['adaptive_wikitext2_ppl']:.3f} | "
+            f"{row['fixed_wikitext2_ppl']:.3f} | "
             f"{row['adaptive_minus_baseline_ppl']:+.3f} | "
-            f"{row['baseline_final_calibration_kl']:.4f} | "
-            f"{row['adaptive_final_calibration_kl']:.4f} | "
-            f"{row['adaptive_minus_baseline_kl']:+.4f} | "
-            f"{row['elevated_strength_generations']} | "
-            f"{row['elevated_strength_replacements']} |"
+            f"{row['fixed_minus_baseline_ppl']:+.3f} | "
+            f"{row['adaptive_minus_fixed_ppl']:+.3f} |"
         )
 
     lines.extend(
         [
+            "",
+            "## Calibration objective",
+            "",
+            "| Variant | Final KL mean +/- SD | Mean delta from default |",
+            "| --- | ---: | ---: |",
+            f"| {LABELS['baseline']} | {mean(baseline_kl):.4f} +/- {sample_std(baseline_kl):.4f} | - |",
+            f"| {LABELS['adaptive']} | {mean(adaptive_kl):.4f} +/- {sample_std(adaptive_kl):.4f} | {mean(adaptive_kl_deltas):+.4f} |",
+            f"| {LABELS['fixed']} | {mean(fixed_kl):.4f} +/- {sample_std(fixed_kl):.4f} | {mean(fixed_kl_deltas):+.4f} |",
             "",
             "## Strength schedule",
             "",
@@ -375,15 +431,15 @@ def build_markdown(
             "",
             f"Elevated strengths were active for {elevated_generations} generation(s), all in seed 2. They produced {elevated_replacements} accepted replacement(s). Seeds 0 and 1 stayed at strength 1 for all generations. Therefore the improved aggregate result cannot be attributed to escalation; the final candidates were selected entirely under strength-1 behavior.",
             "",
-            "The current comparison is also not a pure scheduling ablation. The existing baseline permits up to three depth swaps from the start, while adaptive mode begins with exactly one. The result may indicate that smaller local mutations are better, not that increasing strength after stagnation is beneficial.",
+            "The fixed-strength control resolves the earlier attribution problem. Seeds 0 and 1 produced byte-identical final candidates under adaptive and fixed-strength modes. Seed 2 used elevated adaptive strengths for six generations but accepted no elevated-strength replacement; fixed strength 1 was slightly better by 0.047 PPL.",
             "",
             "## Decision",
             "",
-            "Do not promote adaptive scheduling directly to Mistral yet. The quality signal is stronger than the joint-aware probability screen, but attribution is unresolved. Run a fixed-strength-1 control with the same three seeds. If fixed strength 1 reproduces the gain, the contribution is mutation locality. If adaptive mode beats fixed strength 1, escalation has evidence and can advance.",
+            "The supported contribution is mutation locality, not adaptive escalation. A single depth swap per mutation improved mean PPL and substantially reduced variance relative to allowing up to three swaps. Promote fixed strength 1 to a matched Mistral ablation. Do not spend Mistral compute on the current adaptive schedule unless a future design makes elevated mutations demonstrably useful.",
             "",
             "## Generated artifacts",
             "",
-            "- `results/adaptive_mutation_screen.csv`: paired final metrics.",
+            "- `results/adaptive_mutation_screen.csv`: three-way paired final metrics.",
             "- `results/adaptive_mutation_strengths.csv`: per-seed strength usage and selected mutations.",
             "- `results/adaptive_mutation_convergence.csv`: generation-wise quality, strength, and provenance.",
             "- `results/adaptive_mutation_screen.png`: paired final PPL and convergence.",
@@ -402,23 +458,31 @@ def create_plot(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    colors = {"baseline": "#8c1d40", "adaptive": "#2ca02c"}
+    colors = {
+        "baseline": "#8c1d40",
+        "adaptive": "#2ca02c",
+        "fixed": "#1f77b4",
+    }
     fig, (paired_ax, convergence_ax) = plt.subplots(
         1, 2, figsize=(11, 4.5)
     )
 
     for row in pairs:
         paired_ax.plot(
-            [0, 1],
+            [0, 1, 2],
             [
                 row["baseline_wikitext2_ppl"],
                 row["adaptive_wikitext2_ppl"],
+                row["fixed_wikitext2_ppl"],
             ],
             marker="o",
             alpha=0.75,
             label=f"Seed {row['seed']}",
         )
-    paired_ax.set_xticks([0, 1], ["Default", "Adaptive"])
+    paired_ax.set_xticks(
+        [0, 1, 2],
+        ["Default", "Adaptive", "Fixed-1"],
+    )
     paired_ax.set_ylabel("Final WikiText2 perplexity")
     paired_ax.set_title("Paired Final Results")
     paired_ax.grid(alpha=0.25)
@@ -482,13 +546,21 @@ def main() -> None:
             "seed",
             "baseline_wikitext2_ppl",
             "adaptive_wikitext2_ppl",
+            "fixed_wikitext2_ppl",
             "adaptive_minus_baseline_ppl",
+            "fixed_minus_baseline_ppl",
+            "adaptive_minus_fixed_ppl",
             "baseline_final_calibration_kl",
             "adaptive_final_calibration_kl",
+            "fixed_final_calibration_kl",
             "adaptive_minus_baseline_kl",
+            "fixed_minus_baseline_kl",
+            "adaptive_minus_fixed_kl",
             "baseline_runtime_seconds",
             "adaptive_runtime_seconds",
+            "fixed_runtime_seconds",
             "adaptive_minus_baseline_runtime_seconds",
+            "fixed_minus_baseline_runtime_seconds",
             "elevated_strength_generations",
             "elevated_strength_replacements",
         ),
