@@ -208,6 +208,20 @@ def selected_candidate_metadata(
     return selected_metadata
 
 
+def adaptive_mutation_strength(
+    stagnation_generations: int,
+    patience: int,
+    max_strength: int,
+) -> int:
+    if stagnation_generations < 0:
+        raise ValueError("stagnation_generations must be non-negative.")
+    if patience < 1:
+        raise ValueError("patience must be at least 1.")
+    if max_strength < 1:
+        raise ValueError("max_strength must be at least 1.")
+    return min(max_strength, 1 + stagnation_generations // patience)
+
+
 def make_random_drop_state(num_blocks: int, blocks_to_remove: int, drop_entire_block: bool):
     removed_state = {
         "attn": [False] * num_blocks,
@@ -572,6 +586,26 @@ def parse_args():
         type=float,
         help="Probability of a coupled offspring when joint-aware mutation is enabled.",
     )
+    parser.add_argument(
+        "--adaptive_mutation",
+        action="store_true",
+        help=(
+            "Increase depth-swap and quant-exchange counts after consecutive "
+            "generations that retain the parent."
+        ),
+    )
+    parser.add_argument(
+        "--adaptive_mutation_patience",
+        default=3,
+        type=int,
+        help="Retained-parent generations required before increasing mutation strength.",
+    )
+    parser.add_argument(
+        "--adaptive_mutation_max_strength",
+        default=3,
+        type=int,
+        help="Maximum depth swaps or quant exchanges per adaptive offspring.",
+    )
 
     parser.add_argument("--fitness_fn", default="kl", choices=["ppl", "kl"])
 
@@ -606,8 +640,16 @@ def main():
         raise ValueError("--active_quant_budget requires --group_rule size.")
     if args.joint_aware_mutation and not args.active_quant_budget:
         raise ValueError("--joint_aware_mutation requires --active_quant_budget.")
+    if args.adaptive_mutation and args.joint_aware_mutation:
+        raise ValueError(
+            "--adaptive_mutation and --joint_aware_mutation must be ablated separately."
+        )
     if not 0.0 <= args.joint_aware_probability <= 1.0:
         raise ValueError("--joint_aware_probability must be between 0 and 1.")
+    if args.adaptive_mutation_patience < 1:
+        raise ValueError("--adaptive_mutation_patience must be at least 1.")
+    if args.adaptive_mutation_max_strength < 1:
+        raise ValueError("--adaptive_mutation_max_strength must be at least 1.")
 
     fix_seed(args.seed)
 
@@ -745,9 +787,27 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
+    stagnation_generations = 0
     for generation in range(args.generations):
         generation_parent = copy.deepcopy(parent)
         generation_train_fitness = train_fitness
+        mutation_strength = (
+            adaptive_mutation_strength(
+                stagnation_generations,
+                args.adaptive_mutation_patience,
+                args.adaptive_mutation_max_strength,
+            )
+            if args.adaptive_mutation
+            else 1
+        )
+        depth_mutation_limit = (
+            mutation_strength
+            if args.adaptive_mutation
+            else args.max_drop_mutations
+        )
+        quant_mutation_count = (
+            mutation_strength if args.adaptive_mutation else 1
+        )
         print(f"Generation {generation + 1}/{args.generations}")
         print(f"Train fitness: {train_fitness:.4e}")
         print("Drop config:")
@@ -811,7 +871,7 @@ def main():
                 offspring["drop"] = mutate_drop_state(
                     offspring["drop"],
                     args.drop_entire_block,
-                    args.max_drop_mutations,
+                    depth_mutation_limit,
                 )
                 if args.active_quant_budget:
                     offspring["quant"] = repair_active_quant_budget(
@@ -824,14 +884,15 @@ def main():
                     )
             else:
                 mutation_type = "quantization"
-                offspring["quant"] = mutate_quant_state(
-                    model,
-                    grouped_layer_names,
-                    args.quant_weights_path,
-                    offspring["quant"],
-                    args.step_size,
-                    offspring["drop"] if args.active_quant_budget else None,
-                )
+                for _ in range(quant_mutation_count):
+                    offspring["quant"] = mutate_quant_state(
+                        model,
+                        grouped_layer_names,
+                        args.quant_weights_path,
+                        offspring["quant"],
+                        args.step_size,
+                        offspring["drop"] if args.active_quant_budget else None,
+                    )
 
             if offspring in offspring_list or offspring == parent:
                 continue
@@ -869,6 +930,11 @@ def main():
         parent = offspring_list[0]
         train_fitness = train_fitnesses[0]
         selected_parent_mutation_type = offspring_mutation_types[0]
+        accepted_parent_replacement = parent != generation_parent
+        if accepted_parent_replacement:
+            stagnation_generations = 0
+        else:
+            stagnation_generations += 1
 
         generation_depth_details = build_depth_details(
             attention_module_names,
@@ -929,18 +995,30 @@ def main():
                         else "mixed_depth_quantization"
                     ),
                     "generated_offspring_by_type": mutation_counts,
-                    "maximum_depth_mutations_per_offspring": args.max_drop_mutations,
+                    "maximum_depth_mutations_per_offspring": depth_mutation_limit,
                     "quantization_step_size": args.step_size,
+                    "quantization_mutations_per_offspring": quant_mutation_count,
                     "joint_aware_probability": (
                         args.joint_aware_probability
                         if args.joint_aware_mutation
                         else 0.0
                     ),
+                    "adaptive_mutation": args.adaptive_mutation,
+                    "adaptive_mutation_strength": mutation_strength,
+                    "adaptive_mutation_patience": (
+                        args.adaptive_mutation_patience
+                    ),
+                    "adaptive_mutation_max_strength": (
+                        args.adaptive_mutation_max_strength
+                    ),
+                    "stagnation_generations_after_selection": (
+                        stagnation_generations
+                    ),
                 },
                 "selected_parent_mutation_type": (
                     selected_parent_mutation_type
                 ),
-                "accepted_parent_replacement": parent != generation_parent,
+                "accepted_parent_replacement": accepted_parent_replacement,
                 "runtime_seconds_cumulative": reporter.runtime_seconds(),
                 "peak_gpu_memory_mb": peak_gpu_memory()[0],
             }
@@ -1049,6 +1127,11 @@ def main():
                 args.joint_aware_probability
                 if args.joint_aware_mutation
                 else 0.0
+            ),
+            "adaptive_mutation": args.adaptive_mutation,
+            "adaptive_mutation_patience": args.adaptive_mutation_patience,
+            "adaptive_mutation_max_strength": (
+                args.adaptive_mutation_max_strength
             ),
             "drop_entire_block": args.drop_entire_block,
             "quant_weights_path": args.quant_weights_path,

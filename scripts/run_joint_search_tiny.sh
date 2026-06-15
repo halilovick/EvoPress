@@ -26,6 +26,9 @@ GROUP_RULE="${GROUP_RULE:-none}"
 ACTIVE_QUANT_BUDGET="${ACTIVE_QUANT_BUDGET:-0}"
 JOINT_AWARE_MUTATION="${JOINT_AWARE_MUTATION:-0}"
 JOINT_AWARE_PROBABILITY="${JOINT_AWARE_PROBABILITY:-0.5}"
+ADAPTIVE_MUTATION="${ADAPTIVE_MUTATION:-0}"
+ADAPTIVE_MUTATION_PATIENCE="${ADAPTIVE_MUTATION_PATIENCE:-3}"
+ADAPTIVE_MUTATION_MAX_STRENGTH="${ADAPTIVE_MUTATION_MAX_STRENGTH:-3}"
 STEP_SIZE="${STEP_SIZE:-1}"
 MAX_DROP_MUTATIONS="${MAX_DROP_MUTATIONS:-3}"
 DROP_ENTIRE_BLOCK="${DROP_ENTIRE_BLOCK:-0}"
@@ -63,6 +66,7 @@ Defaults:
   SEQUENCE_LENGTH=1024
   ACTIVE_QUANT_BUDGET=0
   JOINT_AWARE_MUTATION=0
+  ADAPTIVE_MUTATION=0
 
 Examples:
   scripts/run_joint_search_tiny.sh --dry-run
@@ -143,6 +147,13 @@ if [[ "$JOINT_AWARE_MUTATION" == "1" ]]; then
         --joint_aware_probability "$JOINT_AWARE_PROBABILITY"
     )
 fi
+if [[ "$ADAPTIVE_MUTATION" == "1" ]]; then
+    COMMAND+=(
+        --adaptive_mutation
+        --adaptive_mutation_patience "$ADAPTIVE_MUTATION_PATIENCE"
+        --adaptive_mutation_max_strength "$ADAPTIVE_MUTATION_MAX_STRENGTH"
+    )
+fi
 
 directory_has_files() {
     [[ -d "$1" ]] && [[ -n "$(find "$1" -mindepth 1 -maxdepth 1 -print -quit)" ]]
@@ -161,6 +172,10 @@ validate_configuration() {
     fi
     if [[ "$JOINT_AWARE_MUTATION" == "1" && "$ACTIVE_QUANT_BUDGET" != "1" ]]; then
         printf 'JOINT_AWARE_MUTATION=1 requires ACTIVE_QUANT_BUDGET=1.\n' >&2
+        return 2
+    fi
+    if [[ "$JOINT_AWARE_MUTATION" == "1" && "$ADAPTIVE_MUTATION" == "1" ]]; then
+        printf 'JOINT_AWARE_MUTATION and ADAPTIVE_MUTATION must be ablated separately.\n' >&2
         return 2
     fi
 }
@@ -364,6 +379,9 @@ START_TIME="$(date +%s)"
     printf 'active_quant_budget=%s\n' "$ACTIVE_QUANT_BUDGET"
     printf 'joint_aware_mutation=%s\n' "$JOINT_AWARE_MUTATION"
     printf 'joint_aware_probability=%s\n' "$JOINT_AWARE_PROBABILITY"
+    printf 'adaptive_mutation=%s\n' "$ADAPTIVE_MUTATION"
+    printf 'adaptive_mutation_patience=%s\n' "$ADAPTIVE_MUTATION_PATIENCE"
+    printf 'adaptive_mutation_max_strength=%s\n' "$ADAPTIVE_MUTATION_MAX_STRENGTH"
     printf 'started_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     printf 'command_file=%s\n' "$COMMAND_FILE"
     printf 'memory_samples_file=%s\n' "$MEMORY_SAMPLES_FILE"
@@ -428,7 +446,7 @@ MAX_CPU_MEMORY_GB="$(max_csv_column 2 "$MEMORY_SAMPLES_FILE")"
 MAX_GPU_MEMORY_GB="$(max_csv_column 3 "$MEMORY_SAMPLES_FILE")"
 
 STATUS=completed
-NOTES="last_successful_step=final_evaluation; quant_weights_path=${QUANT_WEIGHTS_PATH}; drop_sparsity=${DROP_SPARSITY}; target_bitwidth=${TARGET_BITWIDTH}; active_quant_budget=${ACTIVE_QUANT_BUDGET}; joint_aware_mutation=${JOINT_AWARE_MUTATION}; joint_aware_probability=${JOINT_AWARE_PROBABILITY}; actual_average_bitwidth=${FINAL_QUANT_BIT_AVERAGE}; dropped_attn_modules=${DROPPED_ATTN_MODULES}; dropped_mlp_modules=${DROPPED_MLP_MODULES}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
+NOTES="last_successful_step=final_evaluation; quant_weights_path=${QUANT_WEIGHTS_PATH}; drop_sparsity=${DROP_SPARSITY}; target_bitwidth=${TARGET_BITWIDTH}; active_quant_budget=${ACTIVE_QUANT_BUDGET}; joint_aware_mutation=${JOINT_AWARE_MUTATION}; joint_aware_probability=${JOINT_AWARE_PROBABILITY}; adaptive_mutation=${ADAPTIVE_MUTATION}; adaptive_mutation_patience=${ADAPTIVE_MUTATION_PATIENCE}; adaptive_mutation_max_strength=${ADAPTIVE_MUTATION_MAX_STRENGTH}; actual_average_bitwidth=${FINAL_QUANT_BIT_AVERAGE}; dropped_attn_modules=${DROPPED_ATTN_MODULES}; dropped_mlp_modules=${DROPPED_MLP_MODULES}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
 FINAL_EXIT_CODE=0
 
 if [[ "$RUN_EXIT_CODE" != "0" ]]; then

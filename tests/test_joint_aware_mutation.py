@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from evo_joint_search import (
+    adaptive_mutation_strength,
     candidate_bits,
     mutate_joint_aware_candidate,
     selected_candidate_metadata,
@@ -29,6 +30,21 @@ class FakeModel:
 
 
 class JointAwareMutationTest(unittest.TestCase):
+    def test_adaptive_mutation_strength_increases_at_patience_boundaries(self) -> None:
+        self.assertEqual(adaptive_mutation_strength(0, 3, 3), 1)
+        self.assertEqual(adaptive_mutation_strength(2, 3, 3), 1)
+        self.assertEqual(adaptive_mutation_strength(3, 3, 3), 2)
+        self.assertEqual(adaptive_mutation_strength(6, 3, 3), 3)
+        self.assertEqual(adaptive_mutation_strength(20, 3, 3), 3)
+
+    def test_adaptive_mutation_strength_rejects_invalid_parameters(self) -> None:
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            adaptive_mutation_strength(-1, 3, 3)
+        with self.assertRaisesRegex(ValueError, "at least 1"):
+            adaptive_mutation_strength(0, 0, 3)
+        with self.assertRaisesRegex(ValueError, "at least 1"):
+            adaptive_mutation_strength(0, 3, 0)
+
     def test_selected_candidate_metadata_follows_survivors(self) -> None:
         candidates = [
             {"drop": {"attn": [False]}, "quant": [[2]]},

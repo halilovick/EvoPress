@@ -157,6 +157,47 @@ class RunJointSearchTinyTest(unittest.TestCase):
             )
             self.assertFalse(output_dir.exists())
 
+    def test_dry_run_supports_adaptive_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "outputs" / "joint"
+            result = self.run_command(
+                [str(LAUNCHER), "--dry-run"],
+                {
+                    "OUTPUT_DIR": str(output_dir),
+                    "ADAPTIVE_MUTATION": "1",
+                    "ADAPTIVE_MUTATION_PATIENCE": "4",
+                    "ADAPTIVE_MUTATION_MAX_STRENGTH": "2",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--adaptive_mutation", result.stdout)
+            self.assertIn(
+                "--adaptive_mutation_patience 4", result.stdout
+            )
+            self.assertIn(
+                "--adaptive_mutation_max_strength 2", result.stdout
+            )
+            self.assertFalse(output_dir.exists())
+
+    def test_adaptive_and_joint_aware_mutation_are_rejected_together(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "outputs" / "joint"
+            result = self.run_command(
+                [str(LAUNCHER)],
+                {
+                    "OUTPUT_DIR": str(output_dir),
+                    "ACTIVE_QUANT_BUDGET": "1",
+                    "GROUP_RULE": "size",
+                    "JOINT_AWARE_MUTATION": "1",
+                    "ADAPTIVE_MUTATION": "1",
+                },
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("must be ablated separately", result.stderr)
+            self.assertFalse(output_dir.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
