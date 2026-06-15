@@ -444,9 +444,13 @@ fi
 
 MAX_CPU_MEMORY_GB="$(max_csv_column 2 "$MEMORY_SAMPLES_FILE")"
 MAX_GPU_MEMORY_GB="$(max_csv_column 3 "$MEMORY_SAMPLES_FILE")"
+EFFECTIVE_JOINT_AWARE_PROBABILITY=0
+if [[ "$JOINT_AWARE_MUTATION" == "1" ]]; then
+    EFFECTIVE_JOINT_AWARE_PROBABILITY="$JOINT_AWARE_PROBABILITY"
+fi
 
 STATUS=completed
-NOTES="last_successful_step=final_evaluation; quant_weights_path=${QUANT_WEIGHTS_PATH}; drop_sparsity=${DROP_SPARSITY}; target_bitwidth=${TARGET_BITWIDTH}; active_quant_budget=${ACTIVE_QUANT_BUDGET}; joint_aware_mutation=${JOINT_AWARE_MUTATION}; joint_aware_probability=${JOINT_AWARE_PROBABILITY}; adaptive_mutation=${ADAPTIVE_MUTATION}; adaptive_mutation_patience=${ADAPTIVE_MUTATION_PATIENCE}; adaptive_mutation_max_strength=${ADAPTIVE_MUTATION_MAX_STRENGTH}; actual_average_bitwidth=${FINAL_QUANT_BIT_AVERAGE}; dropped_attn_modules=${DROPPED_ATTN_MODULES}; dropped_mlp_modules=${DROPPED_MLP_MODULES}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
+NOTES="last_successful_step=final_evaluation; quant_weights_path=${QUANT_WEIGHTS_PATH}; drop_sparsity=${DROP_SPARSITY}; target_bitwidth=${TARGET_BITWIDTH}; active_quant_budget=${ACTIVE_QUANT_BUDGET}; joint_aware_mutation=${JOINT_AWARE_MUTATION}; joint_aware_probability=${EFFECTIVE_JOINT_AWARE_PROBABILITY}; adaptive_mutation=${ADAPTIVE_MUTATION}; adaptive_mutation_patience=${ADAPTIVE_MUTATION_PATIENCE}; adaptive_mutation_max_strength=${ADAPTIVE_MUTATION_MAX_STRENGTH}; actual_average_bitwidth=${FINAL_QUANT_BIT_AVERAGE}; dropped_attn_modules=${DROPPED_ATTN_MODULES}; dropped_mlp_modules=${DROPPED_MLP_MODULES}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
 FINAL_EXIT_CODE=0
 
 if [[ "$RUN_EXIT_CODE" != "0" ]]; then

@@ -84,6 +84,7 @@ class RunJointSearchTinyTest(unittest.TestCase):
             self.assertIn("actual_average_bitwidth=3.0000e+00", row["notes"])
             self.assertIn("dropped_attn_modules=1", row["notes"])
             self.assertIn("dropped_mlp_modules=1", row["notes"])
+            self.assertIn("joint_aware_probability=0;", row["notes"])
 
     def test_dry_run_supports_active_quant_budget(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

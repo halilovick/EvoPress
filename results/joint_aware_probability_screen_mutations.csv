@@ -1,0 +1,7 @@
+variant,mutation_type,generated_offspring,selected_as_parent,selection_rate
+baseline,depth,262,15,0.05725190839694656
+baseline,quantization,218,16,0.07339449541284404
+baseline,joint_aware,0,0,
+p025,depth,183,8,0.04371584699453552
+p025,quantization,180,18,0.1
+p025,joint_aware,117,4,0.03418803418803419
