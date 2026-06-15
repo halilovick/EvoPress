@@ -199,6 +199,29 @@ class RunJointSearchTinyTest(unittest.TestCase):
             self.assertIn("must be ablated separately", result.stderr)
             self.assertFalse(output_dir.exists())
 
+    def test_dry_run_supports_coarse_to_fine_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "outputs" / "joint"
+            result = self.run_command(
+                [str(LAUNCHER), "--dry-run"],
+                {
+                    "OUTPUT_DIR": str(output_dir),
+                    "COARSE_TO_FINE_MUTATION": "1",
+                    "COARSE_TO_FINE_START_STRENGTH": "3",
+                    "COARSE_TO_FINE_END_STRENGTH": "1",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--coarse_to_fine_mutation", result.stdout)
+            self.assertIn(
+                "--coarse_to_fine_start_strength 3", result.stdout
+            )
+            self.assertIn(
+                "--coarse_to_fine_end_strength 1", result.stdout
+            )
+            self.assertFalse(output_dir.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

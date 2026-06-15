@@ -6,6 +6,7 @@ from pathlib import Path
 from evo_joint_search import (
     adaptive_mutation_strength,
     candidate_bits,
+    coarse_to_fine_mutation_strength,
     mutate_joint_aware_candidate,
     selected_candidate_metadata,
 )
@@ -30,6 +31,23 @@ class FakeModel:
 
 
 class JointAwareMutationTest(unittest.TestCase):
+    def test_coarse_to_fine_strength_uses_equal_schedule_stages(self) -> None:
+        strengths = [
+            coarse_to_fine_mutation_strength(generation, 20, 3, 1)
+            for generation in range(1, 21)
+        ]
+        self.assertEqual(strengths[:6], [3] * 6)
+        self.assertEqual(strengths[6:13], [2] * 7)
+        self.assertEqual(strengths[13:], [1] * 7)
+
+    def test_coarse_to_fine_strength_rejects_invalid_ranges(self) -> None:
+        with self.assertRaisesRegex(ValueError, "at least 1"):
+            coarse_to_fine_mutation_strength(1, 0, 3, 1)
+        with self.assertRaisesRegex(ValueError, "search range"):
+            coarse_to_fine_mutation_strength(0, 20, 3, 1)
+        with self.assertRaisesRegex(ValueError, "greater than"):
+            coarse_to_fine_mutation_strength(1, 20, 1, 2)
+
     def test_adaptive_mutation_strength_increases_at_patience_boundaries(self) -> None:
         self.assertEqual(adaptive_mutation_strength(0, 3, 3), 1)
         self.assertEqual(adaptive_mutation_strength(2, 3, 3), 1)

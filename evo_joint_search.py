@@ -222,6 +222,30 @@ def adaptive_mutation_strength(
     return min(max_strength, 1 + stagnation_generations // patience)
 
 
+def coarse_to_fine_mutation_strength(
+    generation: int,
+    total_generations: int,
+    start_strength: int,
+    end_strength: int,
+) -> int:
+    if total_generations < 1:
+        raise ValueError("total_generations must be at least 1.")
+    if generation < 1 or generation > total_generations:
+        raise ValueError("generation must be within the search range.")
+    if end_strength < 1:
+        raise ValueError("end_strength must be at least 1.")
+    if start_strength < end_strength:
+        raise ValueError(
+            "start_strength must be greater than or equal to end_strength."
+        )
+    num_strengths = start_strength - end_strength + 1
+    stage = min(
+        num_strengths - 1,
+        (generation * num_strengths - 1) // total_generations,
+    )
+    return start_strength - stage
+
+
 def make_random_drop_state(num_blocks: int, blocks_to_remove: int, drop_entire_block: bool):
     removed_state = {
         "attn": [False] * num_blocks,
@@ -606,6 +630,27 @@ def parse_args():
         type=int,
         help="Maximum depth swaps or quant exchanges per adaptive offspring.",
     )
+    parser.add_argument(
+        "--coarse_to_fine_mutation",
+        action="store_true",
+        help=(
+            "Decrease the maximum depth swaps from a broad initial value to "
+            "a local final value over the search. Quantization offspring "
+            "remain one exchange."
+        ),
+    )
+    parser.add_argument(
+        "--coarse_to_fine_start_strength",
+        default=3,
+        type=int,
+        help="Maximum depth swaps during the first schedule stage.",
+    )
+    parser.add_argument(
+        "--coarse_to_fine_end_strength",
+        default=1,
+        type=int,
+        help="Maximum depth swaps during the final schedule stage.",
+    )
 
     parser.add_argument("--fitness_fn", default="kl", choices=["ppl", "kl"])
 
@@ -644,12 +689,29 @@ def main():
         raise ValueError(
             "--adaptive_mutation and --joint_aware_mutation must be ablated separately."
         )
+    if args.coarse_to_fine_mutation and (
+        args.adaptive_mutation or args.joint_aware_mutation
+    ):
+        raise ValueError(
+            "--coarse_to_fine_mutation must be ablated separately from "
+            "adaptive and joint-aware mutation."
+        )
     if not 0.0 <= args.joint_aware_probability <= 1.0:
         raise ValueError("--joint_aware_probability must be between 0 and 1.")
     if args.adaptive_mutation_patience < 1:
         raise ValueError("--adaptive_mutation_patience must be at least 1.")
     if args.adaptive_mutation_max_strength < 1:
         raise ValueError("--adaptive_mutation_max_strength must be at least 1.")
+    if args.coarse_to_fine_end_strength < 1:
+        raise ValueError("--coarse_to_fine_end_strength must be at least 1.")
+    if (
+        args.coarse_to_fine_start_strength
+        < args.coarse_to_fine_end_strength
+    ):
+        raise ValueError(
+            "--coarse_to_fine_start_strength must be greater than or equal "
+            "to --coarse_to_fine_end_strength."
+        )
 
     fix_seed(args.seed)
 
@@ -791,23 +853,27 @@ def main():
     for generation in range(args.generations):
         generation_parent = copy.deepcopy(parent)
         generation_train_fitness = train_fitness
-        mutation_strength = (
-            adaptive_mutation_strength(
+        if args.adaptive_mutation:
+            mutation_strength = adaptive_mutation_strength(
                 stagnation_generations,
                 args.adaptive_mutation_patience,
                 args.adaptive_mutation_max_strength,
             )
-            if args.adaptive_mutation
-            else 1
-        )
-        depth_mutation_limit = (
-            mutation_strength
-            if args.adaptive_mutation
-            else args.max_drop_mutations
-        )
-        quant_mutation_count = (
-            mutation_strength if args.adaptive_mutation else 1
-        )
+            depth_mutation_limit = mutation_strength
+            quant_mutation_count = mutation_strength
+        elif args.coarse_to_fine_mutation:
+            mutation_strength = coarse_to_fine_mutation_strength(
+                generation + 1,
+                args.generations,
+                args.coarse_to_fine_start_strength,
+                args.coarse_to_fine_end_strength,
+            )
+            depth_mutation_limit = mutation_strength
+            quant_mutation_count = 1
+        else:
+            mutation_strength = 1
+            depth_mutation_limit = args.max_drop_mutations
+            quant_mutation_count = 1
         print(f"Generation {generation + 1}/{args.generations}")
         print(f"Train fitness: {train_fitness:.4e}")
         print("Drop config:")
@@ -1011,6 +1077,15 @@ def main():
                     "adaptive_mutation_max_strength": (
                         args.adaptive_mutation_max_strength
                     ),
+                    "coarse_to_fine_mutation": (
+                        args.coarse_to_fine_mutation
+                    ),
+                    "coarse_to_fine_start_strength": (
+                        args.coarse_to_fine_start_strength
+                    ),
+                    "coarse_to_fine_end_strength": (
+                        args.coarse_to_fine_end_strength
+                    ),
                     "stagnation_generations_after_selection": (
                         stagnation_generations
                     ),
@@ -1132,6 +1207,13 @@ def main():
             "adaptive_mutation_patience": args.adaptive_mutation_patience,
             "adaptive_mutation_max_strength": (
                 args.adaptive_mutation_max_strength
+            ),
+            "coarse_to_fine_mutation": args.coarse_to_fine_mutation,
+            "coarse_to_fine_start_strength": (
+                args.coarse_to_fine_start_strength
+            ),
+            "coarse_to_fine_end_strength": (
+                args.coarse_to_fine_end_strength
             ),
             "drop_entire_block": args.drop_entire_block,
             "quant_weights_path": args.quant_weights_path,
