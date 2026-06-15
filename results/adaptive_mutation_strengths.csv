@@ -1,0 +1,9 @@
+variant,seed,mutation_strength,generations,generated_depth,generated_quantization,selected_depth,selected_quantization,retained_parent
+baseline,0,1,20,83,77,4,3,13
+baseline,1,1,20,91,69,7,5,8
+baseline,2,1,20,88,72,4,8,8
+adaptive,0,1,20,87,73,4,7,9
+adaptive,1,1,20,80,80,9,5,6
+adaptive,2,1,14,62,50,2,5,7
+adaptive,2,2,3,12,12,0,0,3
+adaptive,2,3,3,16,8,0,0,3
