@@ -1,0 +1,31 @@
+method,method_label,seed,run_id,dataset,ppl
+dense,Dense FP16,0,generalization_dense_mistral_multidataset_seq1024_seed0,wikitext2,5.96
+dense,Dense FP16,0,generalization_dense_mistral_multidataset_seq1024_seed0,c4,8.86
+dense,Dense FP16,0,generalization_dense_mistral_multidataset_seq1024_seed0,fineweb_edu,7.34
+depth,Depth-only,0,generalization_depth_mistral_s0.25_multidataset_seed0,wikitext2,11.8
+depth,Depth-only,0,generalization_depth_mistral_s0.25_multidataset_seed0,c4,14.73
+depth,Depth-only,0,generalization_depth_mistral_s0.25_multidataset_seed0,fineweb_edu,12.84
+depth,Depth-only,1,generalization_depth_mistral_s0.25_multidataset_seed1,wikitext2,12.45
+depth,Depth-only,1,generalization_depth_mistral_s0.25_multidataset_seed1,c4,15.58
+depth,Depth-only,1,generalization_depth_mistral_s0.25_multidataset_seed1,fineweb_edu,13.8
+depth,Depth-only,2,generalization_depth_mistral_s0.25_multidataset_seed2,wikitext2,11.2
+depth,Depth-only,2,generalization_depth_mistral_s0.25_multidataset_seed2,c4,13.97
+depth,Depth-only,2,generalization_depth_mistral_s0.25_multidataset_seed2,fineweb_edu,12.3
+independent,Independent depth + q_proj quant,0,generalization_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed0,wikitext2,11.97
+independent,Independent depth + q_proj quant,0,generalization_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed0,c4,14.87
+independent,Independent depth + q_proj quant,0,generalization_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed0,fineweb_edu,12.97
+independent,Independent depth + q_proj quant,1,generalization_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed1,wikitext2,12.52
+independent,Independent depth + q_proj quant,1,generalization_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed1,c4,15.73
+independent,Independent depth + q_proj quant,1,generalization_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed1,fineweb_edu,14.05
+independent,Independent depth + q_proj quant,2,generalization_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed2,wikitext2,11.35
+independent,Independent depth + q_proj quant,2,generalization_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed2,c4,14.13
+independent,Independent depth + q_proj quant,2,generalization_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed2,fineweb_edu,12.4
+joint_g50,Joint G50 depth + q_proj quant,0,generalization_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed0,wikitext2,11.47
+joint_g50,Joint G50 depth + q_proj quant,0,generalization_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed0,c4,14.44
+joint_g50,Joint G50 depth + q_proj quant,0,generalization_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed0,fineweb_edu,12.42
+joint_g50,Joint G50 depth + q_proj quant,1,generalization_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed1,wikitext2,10.92
+joint_g50,Joint G50 depth + q_proj quant,1,generalization_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed1,c4,14.19
+joint_g50,Joint G50 depth + q_proj quant,1,generalization_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed1,fineweb_edu,12.26
+joint_g50,Joint G50 depth + q_proj quant,2,generalization_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed2,wikitext2,11.34
+joint_g50,Joint G50 depth + q_proj quant,2,generalization_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed2,c4,14.55
+joint_g50,Joint G50 depth + q_proj quant,2,generalization_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed2,fineweb_edu,12.7
