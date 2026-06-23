@@ -32,6 +32,13 @@ class AdaptiveMutationSummaryTest(unittest.TestCase):
                         "final_calibration_kl": 0.19 + seed,
                         "runtime_seconds": 99 + seed,
                     },
+                    {
+                        "variant": "coarse",
+                        "seed": seed,
+                        "wikitext2_ppl": 10.8 + seed,
+                        "final_calibration_kl": 0.25 + seed,
+                        "runtime_seconds": 101 + seed,
+                    },
                 ]
             )
 
@@ -46,6 +53,12 @@ class AdaptiveMutationSummaryTest(unittest.TestCase):
         )
         self.assertAlmostEqual(
             paired[0]["adaptive_minus_fixed_ppl"], 0.1
+        )
+        self.assertAlmostEqual(
+            paired[0]["coarse_minus_baseline_ppl"], -0.2
+        )
+        self.assertAlmostEqual(
+            paired[0]["coarse_minus_fixed_ppl"], 0.4
         )
         self.assertAlmostEqual(
             paired[0]["adaptive_minus_baseline_kl"], -0.1

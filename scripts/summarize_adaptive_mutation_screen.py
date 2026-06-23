@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize the matched TinyLlama adaptive-mutation screen."""
+"""Summarize the matched TinyLlama mutation-schedule screens."""
 
 from __future__ import annotations
 
@@ -12,17 +12,18 @@ from pathlib import Path
 from typing import Any
 
 
-VARIANTS = ("baseline", "adaptive", "fixed")
+VARIANTS = ("baseline", "adaptive", "fixed", "coarse")
 LABELS = {
     "baseline": "Default mutation (max 3)",
     "adaptive": "Adaptive mutation (patience 3, max 3)",
     "fixed": "Fixed local mutation (strength 1)",
+    "coarse": "Coarse-to-fine mutation (3 -> 1)",
 }
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Summarize the TinyLlama adaptive-mutation screen."
+        description="Summarize the TinyLlama mutation-schedule screens."
     )
     parser.add_argument("--runs-root", default="results/runs")
     parser.add_argument("--output-dir", default="results")
@@ -73,6 +74,7 @@ def discover(runs_root: Path) -> dict[str, dict[int, Path]]:
             "screen_adaptive_tiny_pat3_max3_g20_o8_seed{seed}"
         ),
         "fixed": "screen_fixedstrength_tiny_max1_g20_o8_seed{seed}",
+        "coarse": "screen_coarsetofine_tiny_s3_e1_g20_o8_seed{seed}",
     }
     for variant, template in names.items():
         for seed in (0, 1, 2):
@@ -85,7 +87,7 @@ def discover(runs_root: Path) -> dict[str, dict[int, Path]]:
             missing = [path for path in required if not path.is_file()]
             if missing:
                 raise SystemExit(
-                    "Missing adaptive-screen artifacts: "
+                    "Missing mutation-schedule artifacts: "
                     + ", ".join(str(path) for path in missing)
                 )
             discovered[variant][seed] = run_dir
@@ -112,6 +114,10 @@ def load_run(
         variant == "adaptive"
     ):
         raise SystemExit(f"Unexpected adaptive setting in {run_dir}.")
+    if bool(compression.get("coarse_to_fine_mutation", False)) != (
+        variant == "coarse"
+    ):
+        raise SystemExit(f"Unexpected coarse-to-fine setting in {run_dir}.")
     expected_strength = 1 if variant == "fixed" else 3
     command = (run_dir / "command.sh").read_text(encoding="utf-8")
     if f"--max_drop_mutations {expected_strength}" not in command:
@@ -260,12 +266,14 @@ def paired_rows(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         baseline = by_key[("baseline", seed)]
         adaptive = by_key[("adaptive", seed)]
         fixed = by_key[("fixed", seed)]
+        coarse = by_key[("coarse", seed)]
         output.append(
             {
                 "seed": seed,
                 "baseline_wikitext2_ppl": baseline["wikitext2_ppl"],
                 "adaptive_wikitext2_ppl": adaptive["wikitext2_ppl"],
                 "fixed_wikitext2_ppl": fixed["wikitext2_ppl"],
+                "coarse_wikitext2_ppl": coarse["wikitext2_ppl"],
                 "adaptive_minus_baseline_ppl": (
                     adaptive["wikitext2_ppl"]
                     - baseline["wikitext2_ppl"]
@@ -278,6 +286,13 @@ def paired_rows(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     adaptive["wikitext2_ppl"]
                     - fixed["wikitext2_ppl"]
                 ),
+                "coarse_minus_baseline_ppl": (
+                    coarse["wikitext2_ppl"]
+                    - baseline["wikitext2_ppl"]
+                ),
+                "coarse_minus_fixed_ppl": (
+                    coarse["wikitext2_ppl"] - fixed["wikitext2_ppl"]
+                ),
                 "baseline_final_calibration_kl": baseline[
                     "final_calibration_kl"
                 ],
@@ -285,6 +300,9 @@ def paired_rows(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "final_calibration_kl"
                 ],
                 "fixed_final_calibration_kl": fixed[
+                    "final_calibration_kl"
+                ],
+                "coarse_final_calibration_kl": coarse[
                     "final_calibration_kl"
                 ],
                 "adaptive_minus_baseline_kl": (
@@ -299,15 +317,28 @@ def paired_rows(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     adaptive["final_calibration_kl"]
                     - fixed["final_calibration_kl"]
                 ),
+                "coarse_minus_baseline_kl": (
+                    coarse["final_calibration_kl"]
+                    - baseline["final_calibration_kl"]
+                ),
+                "coarse_minus_fixed_kl": (
+                    coarse["final_calibration_kl"]
+                    - fixed["final_calibration_kl"]
+                ),
                 "baseline_runtime_seconds": baseline["runtime_seconds"],
                 "adaptive_runtime_seconds": adaptive["runtime_seconds"],
                 "fixed_runtime_seconds": fixed["runtime_seconds"],
+                "coarse_runtime_seconds": coarse["runtime_seconds"],
                 "adaptive_minus_baseline_runtime_seconds": (
                     adaptive["runtime_seconds"]
                     - baseline["runtime_seconds"]
                 ),
                 "fixed_minus_baseline_runtime_seconds": (
                     fixed["runtime_seconds"]
+                    - baseline["runtime_seconds"]
+                ),
+                "coarse_minus_baseline_runtime_seconds": (
+                    coarse["runtime_seconds"]
                     - baseline["runtime_seconds"]
                 ),
                 "elevated_strength_generations": adaptive[
@@ -333,9 +364,11 @@ def build_markdown(
         row for row in run_rows if row["variant"] == "adaptive"
     ]
     fixed = [row for row in run_rows if row["variant"] == "fixed"]
+    coarse = [row for row in run_rows if row["variant"] == "coarse"]
     baseline_ppl = [float(row["wikitext2_ppl"]) for row in baseline]
     adaptive_ppl = [float(row["wikitext2_ppl"]) for row in adaptive]
     fixed_ppl = [float(row["wikitext2_ppl"]) for row in fixed]
+    coarse_ppl = [float(row["wikitext2_ppl"]) for row in coarse]
     baseline_kl = [
         float(row["final_calibration_kl"]) for row in baseline
     ]
@@ -344,6 +377,9 @@ def build_markdown(
     ]
     fixed_kl = [
         float(row["final_calibration_kl"]) for row in fixed
+    ]
+    coarse_kl = [
+        float(row["final_calibration_kl"]) for row in coarse
     ]
     adaptive_ppl_deltas = [
         float(row["adaptive_minus_baseline_ppl"]) for row in pairs
@@ -354,14 +390,24 @@ def build_markdown(
     adaptive_fixed_ppl_deltas = [
         float(row["adaptive_minus_fixed_ppl"]) for row in pairs
     ]
+    coarse_ppl_deltas = [
+        float(row["coarse_minus_baseline_ppl"]) for row in pairs
+    ]
+    coarse_fixed_ppl_deltas = [
+        float(row["coarse_minus_fixed_ppl"]) for row in pairs
+    ]
     adaptive_kl_deltas = [
         float(row["adaptive_minus_baseline_kl"]) for row in pairs
     ]
     fixed_kl_deltas = [
         float(row["fixed_minus_baseline_kl"]) for row in pairs
     ]
+    coarse_kl_deltas = [
+        float(row["coarse_minus_baseline_kl"]) for row in pairs
+    ]
     adaptive_wins = sum(delta < 0 for delta in adaptive_ppl_deltas)
     fixed_wins = sum(delta < 0 for delta in fixed_ppl_deltas)
+    coarse_wins = sum(delta < 0 for delta in coarse_ppl_deltas)
     elevated_generations = sum(
         int(row["elevated_strength_generations"]) for row in adaptive
     )
@@ -370,9 +416,9 @@ def build_markdown(
     )
 
     lines = [
-        "# TinyLlama Adaptive Mutation Screen",
+        "# TinyLlama Mutation Schedule Screen",
         "",
-        "This matched ablation compares the existing joint search, adaptive mutation strength, and a fixed strength-1 control. All runs use TinyLlama, WikiText2, 12.5% depth sparsity, an active 3-bit `q_proj` budget, 20 generations, 8 offspring, and seeds 0-2.",
+        "This matched ablation compares four joint-search mutation schedules: the default max-3 depth mutation, adaptive mutation, fixed strength-1 local mutation, and coarse-to-fine depth mutation. All runs use TinyLlama, WikiText2, 12.5% depth sparsity, an active 3-bit `q_proj` budget, 20 generations, 8 offspring, and seeds 0-2.",
         "",
         "## Result",
         "",
@@ -381,22 +427,25 @@ def build_markdown(
         f"| {LABELS['baseline']} | 3 | {mean(baseline_ppl):.3f} +/- {sample_std(baseline_ppl):.3f} | {mean(baseline_kl):.4f} +/- {sample_std(baseline_kl):.4f} | {mean([float(row['runtime_seconds']) for row in baseline]):.1f} s |",
         f"| {LABELS['adaptive']} | 3 | {mean(adaptive_ppl):.3f} +/- {sample_std(adaptive_ppl):.3f} | {mean(adaptive_kl):.4f} +/- {sample_std(adaptive_kl):.4f} | {mean([float(row['runtime_seconds']) for row in adaptive]):.1f} s |",
         f"| {LABELS['fixed']} | 3 | {mean(fixed_ppl):.3f} +/- {sample_std(fixed_ppl):.3f} | {mean(fixed_kl):.4f} +/- {sample_std(fixed_kl):.4f} | {mean([float(row['runtime_seconds']) for row in fixed]):.1f} s |",
+        f"| {LABELS['coarse']} | 3 | {mean(coarse_ppl):.3f} +/- {sample_std(coarse_ppl):.3f} | {mean(coarse_kl):.4f} +/- {sample_std(coarse_kl):.4f} | {mean([float(row['runtime_seconds']) for row in coarse]):.1f} s |",
         "",
-        f"Adaptive mode changes mean PPL by {mean(adaptive_ppl_deltas):+.3f} versus the default and wins {adaptive_wins} of 3 seeds. Fixed strength 1 changes mean PPL by {mean(fixed_ppl_deltas):+.3f} and wins {fixed_wins} of 3 seeds. The mean `adaptive - fixed` difference is {mean(adaptive_fixed_ppl_deltas):+.3f} PPL.",
+        f"Adaptive mode changes mean PPL by {mean(adaptive_ppl_deltas):+.3f} versus the default and wins {adaptive_wins} of 3 seeds. Fixed strength 1 changes mean PPL by {mean(fixed_ppl_deltas):+.3f} and wins {fixed_wins} of 3 seeds. Coarse-to-fine changes mean PPL by {mean(coarse_ppl_deltas):+.3f} and wins {coarse_wins} of 3 seeds. The mean `coarse-to-fine - fixed-1` difference is {mean(coarse_fixed_ppl_deltas):+.3f} PPL.",
         "",
         "## Paired seeds",
         "",
-        "| Seed | Default PPL | Adaptive PPL | Fixed-1 PPL | Adaptive - default | Fixed-1 - default | Adaptive - fixed-1 |",
-        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Seed | Default PPL | Adaptive PPL | Fixed-1 PPL | Coarse-to-fine PPL | Adaptive - default | Fixed-1 - default | Coarse - default | Coarse - fixed-1 |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in pairs:
         lines.append(
             f"| {row['seed']} | {row['baseline_wikitext2_ppl']:.3f} | "
             f"{row['adaptive_wikitext2_ppl']:.3f} | "
             f"{row['fixed_wikitext2_ppl']:.3f} | "
+            f"{row['coarse_wikitext2_ppl']:.3f} | "
             f"{row['adaptive_minus_baseline_ppl']:+.3f} | "
             f"{row['fixed_minus_baseline_ppl']:+.3f} | "
-            f"{row['adaptive_minus_fixed_ppl']:+.3f} |"
+            f"{row['coarse_minus_baseline_ppl']:+.3f} | "
+            f"{row['coarse_minus_fixed_ppl']:+.3f} |"
         )
 
     lines.extend(
@@ -409,18 +458,19 @@ def build_markdown(
             f"| {LABELS['baseline']} | {mean(baseline_kl):.4f} +/- {sample_std(baseline_kl):.4f} | - |",
             f"| {LABELS['adaptive']} | {mean(adaptive_kl):.4f} +/- {sample_std(adaptive_kl):.4f} | {mean(adaptive_kl_deltas):+.4f} |",
             f"| {LABELS['fixed']} | {mean(fixed_kl):.4f} +/- {sample_std(fixed_kl):.4f} | {mean(fixed_kl_deltas):+.4f} |",
+            f"| {LABELS['coarse']} | {mean(coarse_kl):.4f} +/- {sample_std(coarse_kl):.4f} | {mean(coarse_kl_deltas):+.4f} |",
             "",
             "## Strength schedule",
             "",
-            "| Seed | Strength | Generations | Generated depth | Generated quant | Selected depth | Selected quant | Parent retained |",
+            "| Variant seed | Strength | Generations | Generated depth | Generated quant | Selected depth | Selected quant | Parent retained |",
             "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for row in strength_rows:
-        if row["variant"] != "adaptive":
+        if row["variant"] not in ("adaptive", "coarse"):
             continue
         lines.append(
-            f"| {row['seed']} | {row['mutation_strength']} | "
+            f"| {LABELS[row['variant']]} seed {row['seed']} | {row['mutation_strength']} | "
             f"{row['generations']} | {row['generated_depth']} | "
             f"{row['generated_quantization']} | {row['selected_depth']} | "
             f"{row['selected_quantization']} | {row['retained_parent']} |"
@@ -433,13 +483,15 @@ def build_markdown(
             "",
             "The fixed-strength control resolves the earlier attribution problem. Seeds 0 and 1 produced byte-identical final candidates under adaptive and fixed-strength modes. Seed 2 used elevated adaptive strengths for six generations but accepted no elevated-strength replacement; fixed strength 1 was slightly better by 0.047 PPL.",
             "",
+            "The coarse-to-fine schedule is a negative screen. It is worse than fixed strength 1 in all three seeds and increases final KL relative to fixed strength 1. Starting with broad mutations and decaying to local search did not preserve the fixed-locality benefit on TinyLlama.",
+            "",
             "## Decision",
             "",
-            "The supported contribution is mutation locality, not adaptive escalation. A single depth swap per mutation improved mean PPL and substantially reduced variance relative to allowing up to three swaps. Promote fixed strength 1 to a matched Mistral ablation. Do not spend Mistral compute on the current adaptive schedule unless a future design makes elevated mutations demonstrably useful.",
+            "The supported small-model contribution remains mutation locality, not adaptive escalation or coarse-to-fine scheduling. A single depth swap per mutation is the best TinyLlama variant tested here. Do not promote the current coarse-to-fine schedule to a three-seed Mistral run.",
             "",
             "## Generated artifacts",
             "",
-            "- `results/adaptive_mutation_screen.csv`: three-way paired final metrics.",
+            "- `results/adaptive_mutation_screen.csv`: paired final metrics.",
             "- `results/adaptive_mutation_strengths.csv`: per-seed strength usage and selected mutations.",
             "- `results/adaptive_mutation_convergence.csv`: generation-wise quality, strength, and provenance.",
             "- `results/adaptive_mutation_screen.png`: paired final PPL and convergence.",
@@ -462,6 +514,7 @@ def create_plot(
         "baseline": "#8c1d40",
         "adaptive": "#2ca02c",
         "fixed": "#1f77b4",
+        "coarse": "#ff7f0e",
     }
     fig, (paired_ax, convergence_ax) = plt.subplots(
         1, 2, figsize=(11, 4.5)
@@ -469,19 +522,20 @@ def create_plot(
 
     for row in pairs:
         paired_ax.plot(
-            [0, 1, 2],
+            [0, 1, 2, 3],
             [
                 row["baseline_wikitext2_ppl"],
                 row["adaptive_wikitext2_ppl"],
                 row["fixed_wikitext2_ppl"],
+                row["coarse_wikitext2_ppl"],
             ],
             marker="o",
             alpha=0.75,
             label=f"Seed {row['seed']}",
         )
     paired_ax.set_xticks(
-        [0, 1, 2],
-        ["Default", "Adaptive", "Fixed-1"],
+        [0, 1, 2, 3],
+        ["Default", "Adaptive", "Fixed-1", "Coarse"],
     )
     paired_ax.set_ylabel("Final WikiText2 perplexity")
     paired_ax.set_title("Paired Final Results")
@@ -513,7 +567,7 @@ def create_plot(
     convergence_ax.grid(alpha=0.25)
     convergence_ax.legend()
 
-    fig.suptitle("TinyLlama Adaptive Mutation Screen")
+    fig.suptitle("TinyLlama Mutation Schedule Screen")
     fig.tight_layout()
     fig.savefig(output_dir / "adaptive_mutation_screen.png", dpi=180)
     plt.close(fig)
@@ -547,20 +601,28 @@ def main() -> None:
             "baseline_wikitext2_ppl",
             "adaptive_wikitext2_ppl",
             "fixed_wikitext2_ppl",
+            "coarse_wikitext2_ppl",
             "adaptive_minus_baseline_ppl",
             "fixed_minus_baseline_ppl",
             "adaptive_minus_fixed_ppl",
+            "coarse_minus_baseline_ppl",
+            "coarse_minus_fixed_ppl",
             "baseline_final_calibration_kl",
             "adaptive_final_calibration_kl",
             "fixed_final_calibration_kl",
+            "coarse_final_calibration_kl",
             "adaptive_minus_baseline_kl",
             "fixed_minus_baseline_kl",
             "adaptive_minus_fixed_kl",
+            "coarse_minus_baseline_kl",
+            "coarse_minus_fixed_kl",
             "baseline_runtime_seconds",
             "adaptive_runtime_seconds",
             "fixed_runtime_seconds",
+            "coarse_runtime_seconds",
             "adaptive_minus_baseline_runtime_seconds",
             "fixed_minus_baseline_runtime_seconds",
+            "coarse_minus_baseline_runtime_seconds",
             "elevated_strength_generations",
             "elevated_strength_replacements",
         ),
