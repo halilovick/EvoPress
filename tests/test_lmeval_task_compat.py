@@ -120,6 +120,15 @@ class LmEvalTaskCompatTest(unittest.TestCase):
 
         self.assertIs(result["task_manager"], manager)
 
+    def test_get_eval_logger_falls_back_when_utils_logger_is_missing(self) -> None:
+        module = self.load_module()
+        delattr(module.utils, "eval_logger")
+
+        logger = module.get_eval_logger("INFO")
+
+        self.assertIs(logger, logging.getLogger("lm_eval"))
+        self.assertEqual(logger.level, logging.INFO)
+
 
 if __name__ == "__main__":
     unittest.main()

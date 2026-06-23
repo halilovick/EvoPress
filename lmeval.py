@@ -346,6 +346,14 @@ def simple_evaluate_compat(task_manager, **kwargs):
     return evaluator.simple_evaluate(**kwargs)
 
 
+def get_eval_logger(verbosity: str) -> logging.Logger:
+    eval_logger = getattr(utils, "eval_logger", None)
+    if eval_logger is None:
+        eval_logger = logging.getLogger("lm_eval")
+    eval_logger.setLevel(getattr(logging, verbosity))
+    return eval_logger
+
+
 def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
     if not args:
         # we allow for args to be passed externally, else we parse them ourselves
@@ -377,8 +385,7 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
     # Override init
     AutoModelForCausalLM.from_pretrained = staticmethod(from_pretrained_overriden)
 
-    eval_logger = utils.eval_logger
-    eval_logger.setLevel(getattr(logging, f"{args.verbosity}"))
+    eval_logger = get_eval_logger(args.verbosity)
     eval_logger.info(f"Verbosity set to {args.verbosity}")
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
