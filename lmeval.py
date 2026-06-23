@@ -1,6 +1,7 @@
 # Copied from https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/__main__.py
 
 import argparse
+import inspect
 import json
 import logging
 import os
@@ -13,9 +14,22 @@ import torch
 from transformers import AutoModelForCausalLM
 
 from lm_eval import evaluator, utils
-from lm_eval.api.registry import ALL_TASKS
-from lm_eval.tasks import include_path, initialize_tasks
 from lm_eval.utils import make_table
+try:
+    from lm_eval.tasks import TaskManager
+except ImportError:
+    TaskManager = None
+
+try:
+    from lm_eval.tasks import include_path, initialize_tasks
+except ImportError:
+    include_path = None
+    initialize_tasks = None
+
+try:
+    from lm_eval.api.registry import ALL_TASKS
+except ImportError:
+    ALL_TASKS = None
 
 try:
     import wandb
@@ -229,6 +243,109 @@ def load_compressed_weights(
     return model
 
 
+def make_task_manager(args: argparse.Namespace):
+    if TaskManager is None:
+        return None
+
+    attempts = (
+        lambda: TaskManager(args.verbosity, include_path=args.include_path),
+        lambda: TaskManager(verbosity=args.verbosity, include_path=args.include_path),
+        lambda: TaskManager(args.verbosity),
+        lambda: TaskManager(verbosity=args.verbosity),
+        lambda: TaskManager(),
+    )
+    last_error = None
+    for attempt in attempts:
+        try:
+            return attempt()
+        except TypeError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    return None
+
+
+def all_task_names(task_manager) -> list[str] | None:
+    if task_manager is not None:
+        for attribute in ("all_tasks", "task_names"):
+            value = getattr(task_manager, attribute, None)
+            if value is not None:
+                return list(value)
+        task_index = getattr(task_manager, "task_index", None)
+        if isinstance(task_index, dict):
+            return list(task_index)
+    if ALL_TASKS is not None:
+        return list(ALL_TASKS)
+    return None
+
+
+def resolve_tasks(args: argparse.Namespace, eval_logger, task_manager) -> list:
+    available_tasks = all_task_names(task_manager)
+
+    if args.tasks is None:
+        if available_tasks is None:
+            raise ValueError(
+                "This lm-eval version does not expose a task registry. "
+                "Pass explicit --tasks instead of leaving it empty."
+            )
+        return available_tasks
+
+    if args.tasks == "list":
+        if available_tasks is None:
+            raise ValueError("This lm-eval version does not expose task listing.")
+        eval_logger.info(
+            "Available Tasks:\n - {}".format("\n - ".join(sorted(available_tasks)))
+        )
+        sys.exit()
+
+    if os.path.isdir(args.tasks):
+        import glob
+
+        task_names = []
+        yaml_path = os.path.join(args.tasks, "*.yaml")
+        for yaml_file in glob.glob(yaml_path):
+            config = utils.load_yaml_config(yaml_file)
+            task_names.append(config)
+        return task_names
+
+    tasks_list = args.tasks.split(",")
+    task_names = []
+    if available_tasks is not None:
+        task_names = utils.pattern_match(tasks_list, available_tasks)
+    else:
+        task_names = [task for task in tasks_list if not os.path.isfile(task)]
+
+    for task in [task for task in tasks_list if task not in task_names]:
+        if os.path.isfile(task):
+            config = utils.load_yaml_config(task)
+            task_names.append(config)
+
+    if available_tasks is not None:
+        task_missing = [
+            task for task in tasks_list if task not in task_names and "*" not in task
+        ]
+        if task_missing:
+            missing = ", ".join(task_missing)
+            eval_logger.error(
+                f"Tasks were not found: {missing}\n"
+                f"{utils.SPACING}Try `lm-eval --tasks list` for list of available tasks",
+            )
+            raise ValueError(
+                f"Tasks not found: {missing}. Try `lm-eval --tasks list` "
+                "for list of available tasks, or '--verbosity DEBUG' to "
+                "troubleshoot task registration issues."
+            )
+
+    return task_names
+
+
+def simple_evaluate_compat(task_manager, **kwargs):
+    signature = inspect.signature(evaluator.simple_evaluate)
+    if task_manager is not None and "task_manager" in signature.parameters:
+        kwargs["task_manager"] = task_manager
+    return evaluator.simple_evaluate(**kwargs)
+
+
 def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
     if not args:
         # we allow for args to be passed externally, else we parse them ourselves
@@ -265,8 +382,6 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
     eval_logger.info(f"Verbosity set to {args.verbosity}")
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-    initialize_tasks(args.verbosity)
-
     if args.log_wandb:
         assert has_wandb, "`wandb` not installed, try pip install `wandb`"
         wandb.init(config=args)
@@ -275,44 +390,14 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
         eval_logger.warning(
             " --limit SHOULD ONLY BE USED FOR TESTING." "REAL METRICS SHOULD NOT BE COMPUTED USING LIMIT."
         )
-    if args.include_path is not None:
+    task_manager = make_task_manager(args)
+    if task_manager is None and initialize_tasks is not None:
+        initialize_tasks(args.verbosity)
+    if task_manager is None and args.include_path is not None and include_path is not None:
         eval_logger.info(f"Including path: {args.include_path}")
         include_path(args.include_path)
 
-    if args.tasks is None:
-        task_names = ALL_TASKS
-    elif args.tasks == "list":
-        eval_logger.info("Available Tasks:\n - {}".format("\n - ".join(sorted(ALL_TASKS))))
-        sys.exit()
-    else:
-        if os.path.isdir(args.tasks):
-            import glob
-
-            task_names = []
-            yaml_path = os.path.join(args.tasks, "*.yaml")
-            for yaml_file in glob.glob(yaml_path):
-                config = utils.load_yaml_config(yaml_file)
-                task_names.append(config)
-        else:
-            tasks_list = args.tasks.split(",")
-            task_names = utils.pattern_match(tasks_list, ALL_TASKS)
-            for task in [task for task in tasks_list if task not in task_names]:
-                if os.path.isfile(task):
-                    config = utils.load_yaml_config(task)
-                    task_names.append(config)
-            task_missing = [
-                task for task in tasks_list if task not in task_names and "*" not in task
-            ]  # we don't want errors if a wildcard ("*") task name was used
-
-            if task_missing:
-                missing = ", ".join(task_missing)
-                eval_logger.error(
-                    f"Tasks were not found: {missing}\n"
-                    f"{utils.SPACING}Try `lm-eval --tasks list` for list of available tasks",
-                )
-                raise ValueError(
-                    f"Tasks not found: {missing}. Try `lm-eval --tasks list` for list of available tasks, or '--verbosity DEBUG' to troubleshoot task registration issues."
-                )
+    task_names = resolve_tasks(args, eval_logger, task_manager)
 
     if args.output_path:
         path = Path(args.output_path)
@@ -334,7 +419,8 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
 
     eval_logger.info(f"Selected Tasks: {task_names}")
 
-    results = evaluator.simple_evaluate(
+    results = simple_evaluate_compat(
+        task_manager,
         model=args.model,
         model_args=args.model_args,
         tasks=task_names,
@@ -387,4 +473,5 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
             wandb.log(results)
 
 
-cli_evaluate()
+if __name__ == "__main__":
+    cli_evaluate()
