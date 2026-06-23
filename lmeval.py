@@ -233,51 +233,29 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
     if not args:
         # we allow for args to be passed externally, else we parse them ourselves
         args = parse_eval_args()
-    assert (
-        sum(
-            [
-                args.drop_layer_config is not None,
-                args.sparse_weights_path is not None,
-                args.quant_weights_path is not None,
-            ]
-        )
-        <= 1
-    ), "At most one of the compression options may be specified."
 
     # Backup original from_pretrained
     from_pretrained_orig = AutoModelForCausalLM.from_pretrained
-    from_pretrained_overriden = from_pretrained_orig
-    # Override from_pretrained
-    if args.drop_layer_config:
-        drop_layer_config = args.drop_layer_config
 
-        def from_pretrained_overriden(*args, **kwargs):
-            model = from_pretrained_orig(*args, **kwargs)
-            # Drop layers given a config
-            drop_layers_from_config(model, drop_layer_config)
-            return model
-
-    elif args.sparse_weights_path:
-        sparse_weights_path = args.sparse_weights_path
-        sparse_config_path = args.sparse_config_path
-        default_level = args.sparse_default_level
-
-        # Define new init
-        def from_pretrained_overriden(*args, **kwargs):
-            model = from_pretrained_orig(*args, **kwargs)
-            model = load_compressed_weights(model, sparse_weights_path, sparse_config_path, default_level)
-            return model
-
-    elif args.quant_weights_path:
-        quant_weights_path = args.quant_weights_path
-        quant_config_path = args.quant_config_path
-        default_level = args.quant_default_level
-
-        # Define new init
-        def from_pretrained_overriden(*args, **kwargs):
-            model = from_pretrained_orig(*args, **kwargs)
-            model = load_compressed_weights(model, quant_weights_path, quant_config_path, default_level)
-            return model
+    def from_pretrained_overriden(*from_args, **from_kwargs):
+        model = from_pretrained_orig(*from_args, **from_kwargs)
+        if args.sparse_weights_path:
+            model = load_compressed_weights(
+                model,
+                args.sparse_weights_path,
+                args.sparse_config_path,
+                args.sparse_default_level,
+            )
+        if args.quant_weights_path:
+            model = load_compressed_weights(
+                model,
+                args.quant_weights_path,
+                args.quant_config_path,
+                args.quant_default_level,
+            )
+        if args.drop_layer_config:
+            drop_layers_from_config(model, args.drop_layer_config)
+        return model
 
     # Override init
     AutoModelForCausalLM.from_pretrained = staticmethod(from_pretrained_overriden)
