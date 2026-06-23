@@ -1,0 +1,4 @@
+run_id,dataset,ppl
+generalization_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed1,wikitext2,12.52
+generalization_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed1,c4,15.73
+generalization_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed1,fineweb_edu,14.05

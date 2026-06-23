@@ -1,0 +1,4 @@
+run_id,dataset,ppl
+generalization_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed1,wikitext2,10.92
+generalization_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed1,c4,14.19
+generalization_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed1,fineweb_edu,12.26

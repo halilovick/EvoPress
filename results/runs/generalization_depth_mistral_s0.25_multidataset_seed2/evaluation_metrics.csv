@@ -1,0 +1,4 @@
+run_id,dataset,ppl
+generalization_depth_mistral_s0.25_multidataset_seed2,wikitext2,11.20
+generalization_depth_mistral_s0.25_multidataset_seed2,c4,13.97
+generalization_depth_mistral_s0.25_multidataset_seed2,fineweb_edu,12.30
