@@ -341,8 +341,18 @@ def resolve_tasks(args: argparse.Namespace, eval_logger, task_manager) -> list:
 
 def simple_evaluate_compat(task_manager, **kwargs):
     signature = inspect.signature(evaluator.simple_evaluate)
+    supports_arbitrary_kwargs = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
     if task_manager is not None and "task_manager" in signature.parameters:
         kwargs["task_manager"] = task_manager
+    if not supports_arbitrary_kwargs:
+        kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if key in signature.parameters
+        }
     return evaluator.simple_evaluate(**kwargs)
 
 

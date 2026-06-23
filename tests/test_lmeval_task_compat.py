@@ -120,6 +120,26 @@ class LmEvalTaskCompatTest(unittest.TestCase):
 
         self.assertIs(result["task_manager"], manager)
 
+    def test_simple_evaluate_compat_drops_unsupported_kwargs(self) -> None:
+        module = self.load_module()
+
+        def simple_evaluate(*, model, tasks):
+            return {
+                "model": model,
+                "tasks": tasks,
+            }
+
+        module.evaluator.simple_evaluate = simple_evaluate
+        result = module.simple_evaluate_compat(
+            object(),
+            model="hf",
+            tasks=["arc_easy"],
+            decontamination_ngrams_path=None,
+            check_integrity=False,
+        )
+
+        self.assertEqual(result, {"model": "hf", "tasks": ["arc_easy"]})
+
     def test_get_eval_logger_falls_back_when_utils_logger_is_missing(self) -> None:
         module = self.load_module()
         delattr(module.utils, "eval_logger")
