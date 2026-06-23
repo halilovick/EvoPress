@@ -68,6 +68,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-prefix", default="lmeval")
     parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
     parser.add_argument(
+        "--limit",
+        default="none",
+        help=(
+            "Expected LM-eval limit recorded in lmeval_config_summary.md. "
+            "Use the default 'none' for final reportable runs."
+        ),
+    )
+    parser.add_argument(
         "--tasks",
         nargs="+",
         default=["arc_easy", "piqa", "winogrande"],
@@ -101,6 +109,61 @@ def run_id_for(method: str, seed: int, run_prefix: str) -> str:
     raise ValueError(f"Unsupported method: {method}")
 
 
+def summary_value(summary_path: Path, key: str) -> str | None:
+    if not summary_path.is_file():
+        return None
+    prefix = f"- {key}: `"
+    for line in summary_path.read_text(encoding="utf-8").splitlines():
+        if line.startswith(prefix) and line.endswith("`"):
+            return line[len(prefix) : -1]
+    return None
+
+
+def run_matches_expected_config(
+    run_dir: Path,
+    *,
+    tasks: Sequence[str],
+    limit: str,
+) -> bool:
+    summary_path = run_dir / "lmeval_config_summary.md"
+    expected_tasks = ",".join(tasks)
+    return (
+        summary_value(summary_path, "tasks") == expected_tasks
+        and summary_value(summary_path, "limit") == limit
+    )
+
+
+def candidate_run_dirs(runs_root: Path, base_run_id: str) -> list[Path]:
+    candidates = [runs_root / base_run_id]
+    candidates.extend(
+        sorted(
+            runs_root.glob(f"{base_run_id}_retry*"),
+            key=lambda path: (
+                len(path.name),
+                path.name,
+            ),
+        )
+    )
+    return candidates
+
+
+def resolve_run_dir(
+    runs_root: Path,
+    base_run_id: str,
+    *,
+    tasks: Sequence[str],
+    limit: str,
+) -> Path | None:
+    matches: list[Path] = []
+    for run_dir in candidate_run_dirs(runs_root, base_run_id):
+        if not (run_dir / "lmeval_results.json").is_file():
+            continue
+        if not run_matches_expected_config(run_dir, tasks=tasks, limit=limit):
+            continue
+        matches.append(run_dir)
+    return matches[-1] if matches else None
+
+
 def choose_metric(task: str, metrics: dict[str, Any]) -> tuple[str, float]:
     for metric in PREFERRED_METRICS:
         if metric in metrics:
@@ -120,18 +183,29 @@ def load_scores(
     seeds: Sequence[int],
     tasks: Sequence[str],
     methods: Sequence[str],
+    limit: str,
     allow_missing: bool,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for method in methods:
         method_seeds = [0] if method == "dense" else list(seeds)
         for seed in method_seeds:
-            run_id = run_id_for(method, seed, run_prefix)
-            path = runs_root / run_id / "lmeval_results.json"
-            if not path.is_file():
+            base_run_id = run_id_for(method, seed, run_prefix)
+            run_dir = resolve_run_dir(
+                runs_root,
+                base_run_id,
+                tasks=tasks,
+                limit=limit,
+            )
+            if run_dir is None:
                 if allow_missing:
                     continue
-                raise SystemExit(f"Missing LM-eval results: {path}")
+                raise SystemExit(
+                    "Missing matching LM-eval results for "
+                    f"{base_run_id} with tasks={','.join(tasks)} and limit={limit}"
+                )
+            run_id = run_dir.name
+            path = run_dir / "lmeval_results.json"
             data = json.loads(path.read_text(encoding="utf-8"))
             results = data.get("results", {})
             missing = [task for task in tasks if task not in results]
@@ -395,6 +469,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         seeds=args.seeds,
         tasks=args.tasks,
         methods=args.methods,
+        limit=args.limit,
         allow_missing=args.allow_missing,
     )
     if not rows:

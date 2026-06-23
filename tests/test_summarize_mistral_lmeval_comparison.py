@@ -10,7 +10,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "summarize_mistral_lmeval_comparison.py"
 
 
-def write_lmeval_result(run_dir: Path, scores: dict[str, float]) -> None:
+def write_lmeval_result(
+    run_dir: Path,
+    scores: dict[str, float],
+    *,
+    limit: str = "none",
+) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     data = {
         "results": {
@@ -24,6 +29,22 @@ def write_lmeval_result(run_dir: Path, scores: dict[str, float]) -> None:
     }
     (run_dir / "lmeval_results.json").write_text(
         json.dumps(data),
+        encoding="utf-8",
+    )
+    (run_dir / "lmeval_config_summary.md").write_text(
+        "\n".join(
+            [
+                "# Mistral LM-Eval Config",
+                "",
+                f"- run_id: `{run_dir.name}`",
+                "- method: `fixture`",
+                "- model: `mistralai/Mistral-7B-v0.3`",
+                "- tasks: `arc_easy,piqa,winogrande`",
+                f"- limit: `{limit}`",
+                "- num_fewshot: `0`",
+            ]
+        )
+        + "\n",
         encoding="utf-8",
     )
 
@@ -123,6 +144,54 @@ class SummarizeMistralLmEvalComparisonTest(unittest.TestCase):
                 (output_dir / "mistral_lmeval_comparison.md").is_file()
             )
 
+    def test_prefers_matching_nonlimited_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runs_root = root / "runs"
+            output_dir = root / "results"
+            write_lmeval_result(
+                runs_root / "lmeval_dense_mistral_tasks_seed0_retry3",
+                {
+                    "arc_easy": 0.10,
+                    "piqa": 0.10,
+                    "winogrande": 0.10,
+                },
+                limit="0.02",
+            )
+            write_lmeval_result(
+                runs_root / "lmeval_dense_mistral_tasks_seed0_retry4",
+                {
+                    "arc_easy": 0.80,
+                    "piqa": 0.75,
+                    "winogrande": 0.70,
+                },
+                limit="none",
+            )
+
+            result = subprocess.run(
+                [
+                    str(SCRIPT),
+                    "--runs-root",
+                    str(runs_root),
+                    "--output-dir",
+                    str(output_dir),
+                    "--methods",
+                    "dense",
+                    "--skip-plots",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with (output_dir / "mistral_lmeval_task_scores.csv").open(
+                newline="", encoding="utf-8"
+            ) as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(rows[0]["run_id"], "lmeval_dense_mistral_tasks_seed0_retry4")
+            self.assertEqual(rows[0]["score"], "0.8")
+
     def test_missing_results_fail_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             result = subprocess.run(
@@ -140,7 +209,7 @@ class SummarizeMistralLmEvalComparisonTest(unittest.TestCase):
             )
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Missing LM-eval results", result.stderr)
+        self.assertIn("Missing matching LM-eval results", result.stderr)
 
 
 if __name__ == "__main__":

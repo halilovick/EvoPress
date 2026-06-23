@@ -68,10 +68,29 @@ runtime_succeeded() {
     [[ -f "$runtime_file" ]] && grep -qx 'exit_code=0' "$runtime_file"
 }
 
+summary_value() {
+    local summary_file="$1"
+    local key="$2"
+    [[ -f "$summary_file" ]] || return 1
+    awk -F'`' -v key="$key" '$0 ~ "^- " key ": `" { print $2; exit }' "$summary_file"
+}
+
+run_matches_current_config() {
+    local run_dir="$1"
+    local summary_file="${run_dir}/lmeval_config_summary.md"
+    local expected_limit="${LIMIT:-none}"
+    [[ -f "$summary_file" ]] || return 1
+    [[ "$(summary_value "$summary_file" "tasks")" == "$TASKS" ]] || return 1
+    [[ "$(summary_value "$summary_file" "limit")" == "$expected_limit" ]] || return 1
+    [[ "$(summary_value "$summary_file" "num_fewshot")" == "$NUM_FEWSHOT" ]] || return 1
+    return 0
+}
+
 run_is_complete() {
     local run_dir="$1"
     runtime_succeeded "$run_dir/runtime.txt" &&
-        [[ -f "$run_dir/lmeval_results.json" ]]
+        [[ -f "$run_dir/lmeval_results.json" ]] &&
+        run_matches_current_config "$run_dir"
 }
 
 directory_has_files() {
