@@ -1,0 +1,31 @@
+method,method_label,seed,run_id,task,metric,score
+dense,Dense FP16,0,lmeval_attention_dense_mistral_tasks_seed0,arc_easy,"acc_norm,none",0.8009259259259259
+dense,Dense FP16,0,lmeval_attention_dense_mistral_tasks_seed0,piqa,"acc_norm,none",0.8199129488574538
+dense,Dense FP16,0,lmeval_attention_dense_mistral_tasks_seed0,winogrande,"acc,none",0.7419100236779794
+depth,Depth-only,0,lmeval_attention_depth_mistral_s0.25_tasks_seed0,arc_easy,"acc_norm,none",0.6077441077441077
+depth,Depth-only,0,lmeval_attention_depth_mistral_s0.25_tasks_seed0,piqa,"acc_norm,none",0.7295973884657236
+depth,Depth-only,0,lmeval_attention_depth_mistral_s0.25_tasks_seed0,winogrande,"acc,none",0.6282557221783741
+depth,Depth-only,1,lmeval_attention_depth_mistral_s0.25_tasks_seed1,arc_easy,"acc_norm,none",0.563973063973064
+depth,Depth-only,1,lmeval_attention_depth_mistral_s0.25_tasks_seed1,piqa,"acc_norm,none",0.7372143634385201
+depth,Depth-only,1,lmeval_attention_depth_mistral_s0.25_tasks_seed1,winogrande,"acc,none",0.6164167324388319
+depth,Depth-only,2,lmeval_attention_depth_mistral_s0.25_tasks_seed2,arc_easy,"acc_norm,none",0.593013468013468
+depth,Depth-only,2,lmeval_attention_depth_mistral_s0.25_tasks_seed2,piqa,"acc_norm,none",0.7448313384113167
+depth,Depth-only,2,lmeval_attention_depth_mistral_s0.25_tasks_seed2,winogrande,"acc,none",0.611681136543015
+independent,Independent depth + attention quant,0,lmeval_attention_independent_depth_quant_mistral_s0.25_attention3.0_tasks_seed0,arc_easy,"acc_norm,none",0.5841750841750841
+independent,Independent depth + attention quant,0,lmeval_attention_independent_depth_quant_mistral_s0.25_attention3.0_tasks_seed0,piqa,"acc_norm,none",0.7154515778019587
+independent,Independent depth + attention quant,0,lmeval_attention_independent_depth_quant_mistral_s0.25_attention3.0_tasks_seed0,winogrande,"acc,none",0.6258879242304657
+independent,Independent depth + attention quant,1,lmeval_attention_independent_depth_quant_mistral_s0.25_attention3.0_tasks_seed1,arc_easy,"acc_norm,none",0.5105218855218855
+independent,Independent depth + attention quant,1,lmeval_attention_independent_depth_quant_mistral_s0.25_attention3.0_tasks_seed1,piqa,"acc_norm,none",0.6828073993471164
+independent,Independent depth + attention quant,1,lmeval_attention_independent_depth_quant_mistral_s0.25_attention3.0_tasks_seed1,winogrande,"acc,none",0.5224940805051302
+independent,Independent depth + attention quant,2,lmeval_attention_independent_depth_quant_mistral_s0.25_attention3.0_tasks_seed2,arc_easy,"acc_norm,none",0.5088383838383839
+independent,Independent depth + attention quant,2,lmeval_attention_independent_depth_quant_mistral_s0.25_attention3.0_tasks_seed2,piqa,"acc_norm,none",0.6898803046789989
+independent,Independent depth + attention quant,2,lmeval_attention_independent_depth_quant_mistral_s0.25_attention3.0_tasks_seed2,winogrande,"acc,none",0.526440410418311
+joint_g50,Joint G50 depth + attention quant,0,lmeval_attention_joint_g50_mistral_s0.25_attention3.0_tasks_seed0,arc_easy,"acc_norm,none",0.5054713804713805
+joint_g50,Joint G50 depth + attention quant,0,lmeval_attention_joint_g50_mistral_s0.25_attention3.0_tasks_seed0,piqa,"acc_norm,none",0.6936887921653971
+joint_g50,Joint G50 depth + attention quant,0,lmeval_attention_joint_g50_mistral_s0.25_attention3.0_tasks_seed0,winogrande,"acc,none",0.5595895816890292
+joint_g50,Joint G50 depth + attention quant,1,lmeval_attention_joint_g50_mistral_s0.25_attention3.0_tasks_seed1,arc_easy,"acc_norm,none",0.553030303030303
+joint_g50,Joint G50 depth + attention quant,1,lmeval_attention_joint_g50_mistral_s0.25_attention3.0_tasks_seed1,piqa,"acc_norm,none",0.6996735582154516
+joint_g50,Joint G50 depth + attention quant,1,lmeval_attention_joint_g50_mistral_s0.25_attention3.0_tasks_seed1,winogrande,"acc,none",0.5303867403314917
+joint_g50,Joint G50 depth + attention quant,2,lmeval_attention_joint_g50_mistral_s0.25_attention3.0_tasks_seed2,arc_easy,"acc_norm,none",0.5429292929292929
+joint_g50,Joint G50 depth + attention quant,2,lmeval_attention_joint_g50_mistral_s0.25_attention3.0_tasks_seed2,piqa,"acc_norm,none",0.7279651795429815
+joint_g50,Joint G50 depth + attention quant,2,lmeval_attention_joint_g50_mistral_s0.25_attention3.0_tasks_seed2,winogrande,"acc,none",0.5927387529597474
