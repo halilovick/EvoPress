@@ -12,14 +12,23 @@ RESULTS_RUNS_ROOT="${RESULTS_RUNS_ROOT:-results/runs}"
 OUTPUTS_ROOT="${OUTPUTS_ROOT:-outputs/experiments}"
 EXPERIMENT_LOG="${EXPERIMENT_LOG:-results/experiment_log.csv}"
 SOURCE_PREFIX="${SOURCE_PREFIX:-thesis_medium}"
+DEPTH_SOURCE_PREFIX="${DEPTH_SOURCE_PREFIX:-$SOURCE_PREFIX}"
+QUANT_SOURCE_PREFIX="${QUANT_SOURCE_PREFIX:-$SOURCE_PREFIX}"
 RUN_PREFIX="${RUN_PREFIX:-thesis_medium}"
+QUANT_SCOPE_LABEL="${QUANT_SCOPE_LABEL:-qproj}"
 SEEDS="${SEEDS:-0 1 2}"
 MODES="${MODES:-independent uniform}"
+DEPTH_SPARSITY="${DEPTH_SPARSITY:-0.25}"
+TARGET_BITWIDTH="${TARGET_BITWIDTH:-3.0}"
+SOURCE_GENERATIONS="${SOURCE_GENERATIONS:-20}"
+SOURCE_OFFSPRING="${SOURCE_OFFSPRING:-16}"
 SEQUENCE_LENGTH="${SEQUENCE_LENGTH:-1024}"
 EVAL_TOKENS="${EVAL_TOKENS:-524288}"
 ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-sdpa}"
 DTYPE="${DTYPE:-float16}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
+EXPECTED_QUANT_MODULES="${EXPECTED_QUANT_MODULES:-32}"
+EXPECTED_QUANT_WEIGHT_FILES="${EXPECTED_QUANT_WEIGHT_FILES:-96}"
 CONTINUE_ON_FAILURE="${CONTINUE_ON_FAILURE:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 
@@ -28,12 +37,16 @@ usage() {
 Usage: scripts/run_mistral_medium_composition_grid.sh [--dry-run] [--continue-on-failure]
 
 Evaluate the missing matched Mistral medium-grid controls for seeds 0, 1, 2:
-  independent: independently searched depth mask + searched q_proj profile
-  uniform:     independently searched depth mask + uniform 3-bit q_proj
+  independent: independently searched depth mask + searched quant profile
+  uniform:     independently searched depth mask + uniform quant profile
 
 The launcher uses the tracked source configs under results/runs, evaluates the
 full WikiText2 split at sequence length 1024, records experiment-log rows, and
 copies lightweight completed artifacts into results/runs for the next sync.
+
+The default scope is q_proj for backwards compatibility. Use
+QUANT_SCOPE_LABEL=attention, EXPECTED_QUANT_MODULES=128, and
+EXPECTED_QUANT_WEIGHT_FILES=384 for q/k/v/o attention-scope runs.
 EOF
 }
 
@@ -115,15 +128,18 @@ validate_inputs() {
             wc -l |
             tr -d ' '
     )"
-    if [[ "$module_dirs" != "32" || "$weight_files" != "96" ]]; then
-        printf 'Incomplete q_proj quantization database: modules=%s/32 files=%s/96\n' \
-            "$module_dirs" "$weight_files" >&2
+    if [[ "$module_dirs" != "$EXPECTED_QUANT_MODULES" ||
+          "$weight_files" != "$EXPECTED_QUANT_WEIGHT_FILES" ]]; then
+        printf 'Incomplete %s quantization database: modules=%s/%s files=%s/%s\n' \
+            "$QUANT_SCOPE_LABEL" \
+            "$module_dirs" "$EXPECTED_QUANT_MODULES" \
+            "$weight_files" "$EXPECTED_QUANT_WEIGHT_FILES" >&2
         return 2
     fi
 
     for seed in $SEEDS; do
-        depth_config="${SOURCE_RUNS_ROOT}/${SOURCE_PREFIX}_depth_mistral_s0.25_g20_o16_seed${seed}/layer_drop_config.txt"
-        quant_config="${SOURCE_RUNS_ROOT}/${SOURCE_PREFIX}_quant_mistral_qproj3.0_g20_o16_seed${seed}/quant_configuration.txt"
+        depth_config="${SOURCE_RUNS_ROOT}/${DEPTH_SOURCE_PREFIX}_depth_mistral_s${DEPTH_SPARSITY}_g${SOURCE_GENERATIONS}_o${SOURCE_OFFSPRING}_seed${seed}/layer_drop_config.txt"
+        quant_config="${SOURCE_RUNS_ROOT}/${QUANT_SOURCE_PREFIX}_quant_mistral_${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_g${SOURCE_GENERATIONS}_o${SOURCE_OFFSPRING}_seed${seed}/quant_configuration.txt"
         [[ -f "$depth_config" ]] || {
             printf 'Missing depth config: %s\n' "$depth_config" >&2
             return 2
@@ -154,8 +170,8 @@ sync_lightweight_artifacts() {
 run_evaluation() {
     local mode="$1"
     local seed="$2"
-    local depth_config="${SOURCE_RUNS_ROOT}/${SOURCE_PREFIX}_depth_mistral_s0.25_g20_o16_seed${seed}/layer_drop_config.txt"
-    local quant_config="${SOURCE_RUNS_ROOT}/${SOURCE_PREFIX}_quant_mistral_qproj3.0_g20_o16_seed${seed}/quant_configuration.txt"
+    local depth_config="${SOURCE_RUNS_ROOT}/${DEPTH_SOURCE_PREFIX}_depth_mistral_s${DEPTH_SPARSITY}_g${SOURCE_GENERATIONS}_o${SOURCE_OFFSPRING}_seed${seed}/layer_drop_config.txt"
+    local quant_config="${SOURCE_RUNS_ROOT}/${QUANT_SOURCE_PREFIX}_quant_mistral_${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_g${SOURCE_GENERATIONS}_o${SOURCE_OFFSPRING}_seed${seed}/quant_configuration.txt"
     local base_run_id
     local method
     local config_path
@@ -167,16 +183,16 @@ run_evaluation() {
 
     case "$mode" in
         independent)
-            base_run_id="${RUN_PREFIX}_independent_depth_quant_mistral_s0.25_qproj3.0_seed${seed}"
+            base_run_id="${RUN_PREFIX}_independent_depth_quant_mistral_s${DEPTH_SPARSITY}_${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_seed${seed}"
             method="independent_depth_quant_eval"
             config_path="$quant_config"
-            sparsity_or_bits="depth0.25+qproj3.0_independent"
+            sparsity_or_bits="depth${DEPTH_SPARSITY}+${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_independent"
             ;;
         uniform)
-            base_run_id="${RUN_PREFIX}_depth_uniform_quant_mistral_s0.25_qproj3.0_seed${seed}"
+            base_run_id="${RUN_PREFIX}_depth_uniform_quant_mistral_s${DEPTH_SPARSITY}_${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_seed${seed}"
             method="depth_uniform_quant_eval"
             config_path=""
-            sparsity_or_bits="depth0.25+qproj3.0_uniform"
+            sparsity_or_bits="depth${DEPTH_SPARSITY}+${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_uniform"
             ;;
         *)
             printf 'Unsupported composition mode: %s\n' "$mode" >&2
