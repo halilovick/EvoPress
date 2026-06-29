@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd /home/jovyan/evopress
+exec python evo_quant_search.py --model_name_or_path mistralai/Mistral-7B-v0.3 --quant_weights_path outputs/experiments/quant_db_mistral_attention_bits234/quant_db/Mistral-7B-v0.3/3bit --target_bitwidth 3.0 --calibration_data wikitext2 --calibration_tokens 8192 --calibration_sequence_length 1024 --eval_every 5 --eval_datasets wikitext2 --eval_tokens 131072 --eval_sequence_length 1024 --generations 10 --offspring 8 --initially_generated 16 --initial_tokens 512 --survivors_per_selection 4 2 1 --tokens_per_selection 512 2048 8192 --fitness_fn kl --group_rule size --step_size 1 --dtype float16 --attn_implementation sdpa --seed 0 --configuration_name attention_scope_smoke_quant_mistral_attention3.0_g10_o8_seed0_final_configuration.txt --output_dir outputs/experiments/attention_scope_smoke_quant_mistral_attention3.0_g10_o8_seed0 --use_fast_tokenizer 
