@@ -13,7 +13,7 @@ from typing import Any, Sequence
 
 
 METHOD_ORDER = ("dense", "depth", "independent", "joint_g50")
-METHOD_LABELS = {
+DEFAULT_METHOD_LABELS = {
     "dense": "Dense FP16",
     "depth": "Depth-only",
     "independent": "Independent depth + q_proj quant",
@@ -66,6 +66,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--runs-root", default="results/runs")
     parser.add_argument("--output-dir", default="results")
     parser.add_argument("--run-prefix", default="lmeval")
+    parser.add_argument("--output-stem", default="mistral_lmeval")
+    parser.add_argument("--depth-sparsity", default="0.25")
+    parser.add_argument("--quant-scope-label", default="qproj")
+    parser.add_argument("--target-bitwidth", default="3.0")
     parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
     parser.add_argument(
         "--limit",
@@ -91,20 +95,45 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def run_id_for(method: str, seed: int, run_prefix: str) -> str:
+def display_scope_label(quant_scope_label: str) -> str:
+    return "q_proj" if quant_scope_label == "qproj" else quant_scope_label
+
+
+def method_labels(quant_scope_label: str) -> dict[str, str]:
+    if quant_scope_label == "qproj":
+        return dict(DEFAULT_METHOD_LABELS)
+    scope = display_scope_label(quant_scope_label)
+    return {
+        "dense": "Dense FP16",
+        "depth": "Depth-only",
+        "independent": f"Independent depth + {scope} quant",
+        "joint_g50": f"Joint G50 depth + {scope} quant",
+    }
+
+
+def run_id_for(
+    method: str,
+    seed: int,
+    run_prefix: str,
+    depth_sparsity: str,
+    quant_scope_label: str,
+    target_bitwidth: str,
+) -> str:
     if method == "dense":
         return f"{run_prefix}_dense_mistral_tasks_seed0"
     if method == "depth":
-        return f"{run_prefix}_depth_mistral_s0.25_tasks_seed{seed}"
+        return f"{run_prefix}_depth_mistral_s{depth_sparsity}_tasks_seed{seed}"
     if method == "independent":
         return (
             f"{run_prefix}_independent_depth_quant_mistral_"
-            f"s0.25_qproj3.0_tasks_seed{seed}"
+            f"s{depth_sparsity}_{quant_scope_label}{target_bitwidth}_"
+            f"tasks_seed{seed}"
         )
     if method == "joint_g50":
         return (
             f"{run_prefix}_joint_g50_mistral_"
-            f"s0.25_qproj3.0_tasks_seed{seed}"
+            f"s{depth_sparsity}_{quant_scope_label}{target_bitwidth}_"
+            f"tasks_seed{seed}"
         )
     raise ValueError(f"Unsupported method: {method}")
 
@@ -180,17 +209,28 @@ def load_scores(
     runs_root: Path,
     *,
     run_prefix: str,
+    depth_sparsity: str,
+    quant_scope_label: str,
+    target_bitwidth: str,
     seeds: Sequence[int],
     tasks: Sequence[str],
     methods: Sequence[str],
     limit: str,
     allow_missing: bool,
+    labels: dict[str, str],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for method in methods:
         method_seeds = [0] if method == "dense" else list(seeds)
         for seed in method_seeds:
-            base_run_id = run_id_for(method, seed, run_prefix)
+            base_run_id = run_id_for(
+                method,
+                seed,
+                run_prefix,
+                depth_sparsity,
+                quant_scope_label,
+                target_bitwidth,
+            )
             run_dir = resolve_run_dir(
                 runs_root,
                 base_run_id,
@@ -220,7 +260,7 @@ def load_scores(
                 rows.append(
                     {
                         "method": method,
-                        "method_label": METHOD_LABELS[method],
+                        "method_label": labels[method],
                         "seed": seed,
                         "run_id": run_id,
                         "task": task,
@@ -262,7 +302,10 @@ def write_csv(
             writer.writerow({column: row.get(column, "") for column in columns})
 
 
-def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def aggregate_rows(
+    rows: list[dict[str, Any]],
+    labels: dict[str, str],
+) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     for row in rows:
         grouped[(row["method"], row["task"], row["metric"])].append(
@@ -279,7 +322,7 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             aggregate.append(
                 {
                     "method": method,
-                    "method_label": METHOD_LABELS[method],
+                    "method_label": labels[method],
                     "task": task,
                     "metric": metric,
                     "runs": len(values),
@@ -343,6 +386,7 @@ def write_markdown(
     rows: list[dict[str, Any]],
     aggregate: list[dict[str, Any]],
     paired: list[dict[str, Any]],
+    labels: dict[str, str],
 ) -> None:
     macros = macro_scores(aggregate)
     lines = [
@@ -360,7 +404,7 @@ def write_markdown(
     for method in METHOD_ORDER:
         if method in macros:
             lines.append(
-                f"| {METHOD_LABELS[method]} | {fmt(macros[method])} |"
+                f"| {labels[method]} | {fmt(macros[method])} |"
             )
 
     lines.extend(
@@ -374,7 +418,7 @@ def write_markdown(
     )
     for row in aggregate:
         lines.append(
-            f"| {METHOD_LABELS[row['method']]} | {row['task']} | "
+            f"| {labels[row['method']]} | {row['task']} | "
             f"{row['metric']} | {row['runs']} | {fmt(row['score_mean'])} | "
             f"{fmt(row['score_sample_std'])} | {fmt(row['score_min'])} | "
             f"{fmt(row['score_max'])} |"
@@ -419,7 +463,7 @@ def write_markdown(
     )
     for row in rows:
         lines.append(
-            f"| {METHOD_LABELS[row['method']]} | {row['seed']} | "
+            f"| {labels[row['method']]} | {row['seed']} | "
             f"`{row['run_id']}` | {row['task']} | {row['metric']} | "
             f"{fmt(row['score'])} |"
         )
@@ -427,7 +471,11 @@ def write_markdown(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_plot(path: Path, aggregate: list[dict[str, Any]]) -> None:
+def write_plot(
+    path: Path,
+    aggregate: list[dict[str, Any]],
+    labels: dict[str, str],
+) -> None:
     import matplotlib.pyplot as plt
 
     tasks = sorted({row["task"] for row in aggregate})
@@ -447,7 +495,7 @@ def write_plot(path: Path, aggregate: list[dict[str, Any]]) -> None:
             x + (index - (len(METHOD_ORDER) - 1) / 2) * width
             for x in x_positions
         ]
-        ax.bar(offsets, values, width=width, label=METHOD_LABELS[method])
+        ax.bar(offsets, values, width=width, label=labels[method])
 
     ax.set_xticks(x_positions)
     ax.set_xticklabels(tasks)
@@ -463,40 +511,50 @@ def write_plot(path: Path, aggregate: list[dict[str, Any]]) -> None:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
+    labels = method_labels(args.quant_scope_label)
     rows = load_scores(
         Path(args.runs_root),
         run_prefix=args.run_prefix,
+        depth_sparsity=args.depth_sparsity,
+        quant_scope_label=args.quant_scope_label,
+        target_bitwidth=args.target_bitwidth,
         seeds=args.seeds,
         tasks=args.tasks,
         methods=args.methods,
         limit=args.limit,
         allow_missing=args.allow_missing,
+        labels=labels,
     )
     if not rows:
         raise SystemExit("No LM-eval score rows were found.")
-    aggregate = aggregate_rows(rows)
+    aggregate = aggregate_rows(rows, labels)
     paired = paired_rows(rows)
     output_dir = Path(args.output_dir)
 
-    write_csv(output_dir / "mistral_lmeval_task_scores.csv", SCORE_COLUMNS, rows)
+    write_csv(output_dir / f"{args.output_stem}_task_scores.csv", SCORE_COLUMNS, rows)
     write_csv(
-        output_dir / "mistral_lmeval_aggregate.csv",
+        output_dir / f"{args.output_stem}_aggregate.csv",
         AGGREGATE_COLUMNS,
         aggregate,
     )
     write_csv(
-        output_dir / "mistral_lmeval_paired_deltas.csv",
+        output_dir / f"{args.output_stem}_paired_deltas.csv",
         PAIRED_COLUMNS,
         paired,
     )
     write_markdown(
-        output_dir / "mistral_lmeval_comparison.md",
+        output_dir / f"{args.output_stem}_comparison.md",
         rows,
         aggregate,
         paired,
+        labels,
     )
     if not args.skip_plots:
-        write_plot(output_dir / "mistral_lmeval_comparison.png", aggregate)
+        write_plot(
+            output_dir / f"{args.output_stem}_comparison.png",
+            aggregate,
+            labels,
+        )
 
     print(f"Wrote {len(rows)} task score rows.")
     print(f"Wrote {len(aggregate)} aggregate rows.")

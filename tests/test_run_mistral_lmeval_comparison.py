@@ -166,6 +166,46 @@ class RunMistralLmEvalComparisonTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("Unsupported method", result.stderr)
 
+    def test_attention_scope_dry_run_uses_attention_configs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_command(
+                [str(LAUNCHER), "--dry-run"],
+                {
+                    "OUTPUTS_ROOT": str(Path(temp_dir) / "outputs"),
+                    "EXPERIMENT_LOG": str(Path(temp_dir) / "experiment_log.csv"),
+                    "RUN_PREFIX": "lmeval_attention",
+                    "METHODS": "independent joint_g50",
+                    "QUANT_WEIGHTS_PATH": "outputs/experiments/quant_db_mistral_attention_bits234/quant_db/Mistral-7B-v0.3/3bit",
+                    "DEPTH_SOURCE_PREFIX": "thesis_medium",
+                    "QUANT_SOURCE_PREFIX": "thesis_attention",
+                    "JOINT_SOURCE_PREFIX": "thesis_attention_g50",
+                    "QUANT_SCOPE_LABEL": "attention",
+                },
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for seed in range(3):
+            self.assertIn(
+                "lmeval_attention_independent_depth_quant_mistral_"
+                f"s0.25_attention3.0_tasks_seed{seed}",
+                result.stdout,
+            )
+            self.assertIn(
+                "lmeval_attention_joint_g50_mistral_"
+                f"s0.25_attention3.0_tasks_seed{seed}",
+                result.stdout,
+            )
+            self.assertIn(
+                "results/runs/thesis_attention_quant_mistral_"
+                f"attention3.0_g20_o16_seed{seed}/quant_configuration.txt",
+                result.stdout,
+            )
+            self.assertIn(
+                "results/runs/thesis_attention_g50_joint_mistral_"
+                f"s0.25_attention3.0_g50_o16_seed{seed}/joint_quant_config.txt",
+                result.stdout,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

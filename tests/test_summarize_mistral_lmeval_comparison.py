@@ -211,6 +211,94 @@ class SummarizeMistralLmEvalComparisonTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Missing matching LM-eval results", result.stderr)
 
+    def test_attention_scope_summary_uses_separate_output_stem(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runs_root = root / "runs"
+            output_dir = root / "results"
+            write_lmeval_result(
+                runs_root / "lmeval_attention_dense_mistral_tasks_seed0",
+                {
+                    "arc_easy": 0.80,
+                    "piqa": 0.75,
+                    "winogrande": 0.70,
+                },
+            )
+            for seed in (0, 1, 2):
+                write_lmeval_result(
+                    runs_root
+                    / f"lmeval_attention_depth_mistral_s0.25_tasks_seed{seed}",
+                    {
+                        "arc_easy": 0.60 + seed * 0.01,
+                        "piqa": 0.61 + seed * 0.01,
+                        "winogrande": 0.62 + seed * 0.01,
+                    },
+                )
+                write_lmeval_result(
+                    runs_root
+                    / (
+                        "lmeval_attention_independent_depth_quant_mistral_"
+                        f"s0.25_attention3.0_tasks_seed{seed}"
+                    ),
+                    {
+                        "arc_easy": 0.58 + seed * 0.01,
+                        "piqa": 0.59 + seed * 0.01,
+                        "winogrande": 0.60 + seed * 0.01,
+                    },
+                )
+                write_lmeval_result(
+                    runs_root
+                    / (
+                        "lmeval_attention_joint_g50_mistral_"
+                        f"s0.25_attention3.0_tasks_seed{seed}"
+                    ),
+                    {
+                        "arc_easy": 0.62 + seed * 0.01,
+                        "piqa": 0.63 + seed * 0.01,
+                        "winogrande": 0.64 + seed * 0.01,
+                    },
+                )
+
+            result = subprocess.run(
+                [
+                    str(SCRIPT),
+                    "--runs-root",
+                    str(runs_root),
+                    "--output-dir",
+                    str(output_dir),
+                    "--run-prefix",
+                    "lmeval_attention",
+                    "--quant-scope-label",
+                    "attention",
+                    "--output-stem",
+                    "mistral_attention_lmeval",
+                    "--skip-plots",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Wrote 30 task score rows.", result.stdout)
+            with (output_dir / "mistral_attention_lmeval_aggregate.csv").open(
+                newline="", encoding="utf-8"
+            ) as handle:
+                aggregate_rows = list(csv.DictReader(handle))
+            independent_arc = [
+                row
+                for row in aggregate_rows
+                if row["method"] == "independent"
+                and row["task"] == "arc_easy"
+            ][0]
+            self.assertEqual(
+                independent_arc["method_label"],
+                "Independent depth + attention quant",
+            )
+            self.assertTrue(
+                (output_dir / "mistral_attention_lmeval_comparison.md").is_file()
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,9 +11,20 @@ SOURCE_RUNS_ROOT="${SOURCE_RUNS_ROOT:-results/runs}"
 RESULTS_RUNS_ROOT="${RESULTS_RUNS_ROOT:-results/runs}"
 OUTPUTS_ROOT="${OUTPUTS_ROOT:-outputs/experiments}"
 EXPERIMENT_LOG="${EXPERIMENT_LOG:-results/experiment_log.csv}"
+SOURCE_PREFIX="${SOURCE_PREFIX:-thesis_medium}"
+DEPTH_SOURCE_PREFIX="${DEPTH_SOURCE_PREFIX:-$SOURCE_PREFIX}"
+QUANT_SOURCE_PREFIX="${QUANT_SOURCE_PREFIX:-$SOURCE_PREFIX}"
+JOINT_SOURCE_PREFIX="${JOINT_SOURCE_PREFIX:-thesis_compute_matched}"
 RUN_PREFIX="${RUN_PREFIX:-lmeval}"
+QUANT_SCOPE_LABEL="${QUANT_SCOPE_LABEL:-qproj}"
 SEEDS="${SEEDS:-0 1 2}"
 METHODS="${METHODS:-dense depth independent joint_g50}"
+DEPTH_SPARSITY="${DEPTH_SPARSITY:-0.25}"
+TARGET_BITWIDTH="${TARGET_BITWIDTH:-3.0}"
+SOURCE_GENERATIONS="${SOURCE_GENERATIONS:-20}"
+SOURCE_OFFSPRING="${SOURCE_OFFSPRING:-16}"
+JOINT_GENERATIONS="${JOINT_GENERATIONS:-50}"
+JOINT_OFFSPRING="${JOINT_OFFSPRING:-16}"
 TASKS="${TASKS:-arc_easy,piqa,winogrande}"
 BATCH_SIZE="${BATCH_SIZE:-4}"
 MAX_BATCH_SIZE="${MAX_BATCH_SIZE:-}"
@@ -39,6 +50,10 @@ Harness tasks. The default task set is intentionally modest:
 Set TASKS="arc_easy,arc_challenge,piqa,winogrande,hellaswag" for a broader run
 after the first pass succeeds. Set LIMIT=0.05 only for smoke testing; limited
 LM-eval results should not be reported as final metrics.
+
+The default quantization scope is q_proj for backwards compatibility. Use
+QUANT_SCOPE_LABEL=attention with the attention q/k/v/o database and source
+prefixes to evaluate broader-scope runs.
 EOF
 }
 
@@ -116,6 +131,64 @@ resolve_run_id() {
     done
 }
 
+methods_include() {
+    local wanted="$1"
+    local method
+    for method in $METHODS; do
+        [[ "$method" == "$wanted" ]] && return 0
+    done
+    return 1
+}
+
+depth_config_path() {
+    local seed="$1"
+    printf '%s/%s_depth_mistral_s%s_g%s_o%s_seed%s/layer_drop_config.txt' \
+        "$SOURCE_RUNS_ROOT" \
+        "$DEPTH_SOURCE_PREFIX" \
+        "$DEPTH_SPARSITY" \
+        "$SOURCE_GENERATIONS" \
+        "$SOURCE_OFFSPRING" \
+        "$seed"
+}
+
+quant_config_path() {
+    local seed="$1"
+    printf '%s/%s_quant_mistral_%s%s_g%s_o%s_seed%s/quant_configuration.txt' \
+        "$SOURCE_RUNS_ROOT" \
+        "$QUANT_SOURCE_PREFIX" \
+        "$QUANT_SCOPE_LABEL" \
+        "$TARGET_BITWIDTH" \
+        "$SOURCE_GENERATIONS" \
+        "$SOURCE_OFFSPRING" \
+        "$seed"
+}
+
+joint_drop_config_path() {
+    local seed="$1"
+    printf '%s/%s_joint_mistral_s%s_%s%s_g%s_o%s_seed%s/joint_drop_config.txt' \
+        "$SOURCE_RUNS_ROOT" \
+        "$JOINT_SOURCE_PREFIX" \
+        "$DEPTH_SPARSITY" \
+        "$QUANT_SCOPE_LABEL" \
+        "$TARGET_BITWIDTH" \
+        "$JOINT_GENERATIONS" \
+        "$JOINT_OFFSPRING" \
+        "$seed"
+}
+
+joint_quant_config_path() {
+    local seed="$1"
+    printf '%s/%s_joint_mistral_s%s_%s%s_g%s_o%s_seed%s/joint_quant_config.txt' \
+        "$SOURCE_RUNS_ROOT" \
+        "$JOINT_SOURCE_PREFIX" \
+        "$DEPTH_SPARSITY" \
+        "$QUANT_SCOPE_LABEL" \
+        "$TARGET_BITWIDTH" \
+        "$JOINT_GENERATIONS" \
+        "$JOINT_OFFSPRING" \
+        "$seed"
+}
+
 sync_lightweight_artifacts() {
     local run_id="$1"
     local output_dir="${OUTPUTS_ROOT}/${run_id}"
@@ -143,23 +216,38 @@ validate_inputs() {
     if [[ "$DRY_RUN" == "1" ]]; then
         return
     fi
-    if [[ "$METHODS" == *independent* || "$METHODS" == *joint_g50* ]]; then
+    if methods_include independent || methods_include joint_g50; then
         [[ -d "$QUANT_WEIGHTS_PATH" ]] || {
-            printf 'Missing Mistral q_proj quant database: %s\n' "$QUANT_WEIGHTS_PATH" >&2
+            printf 'Missing Mistral %s quant database: %s\n' \
+                "$QUANT_SCOPE_LABEL" "$QUANT_WEIGHTS_PATH" >&2
             return 2
         }
     fi
     for seed in $SEEDS; do
-        for path in \
-            "${SOURCE_RUNS_ROOT}/thesis_medium_depth_mistral_s0.25_g20_o16_seed${seed}/layer_drop_config.txt" \
-            "${SOURCE_RUNS_ROOT}/thesis_medium_quant_mistral_qproj3.0_g20_o16_seed${seed}/quant_configuration.txt" \
-            "${SOURCE_RUNS_ROOT}/thesis_compute_matched_joint_mistral_s0.25_qproj3.0_g50_o16_seed${seed}/joint_drop_config.txt" \
-            "${SOURCE_RUNS_ROOT}/thesis_compute_matched_joint_mistral_s0.25_qproj3.0_g50_o16_seed${seed}/joint_quant_config.txt"; do
+        if methods_include depth || methods_include independent; then
+            path="$(depth_config_path "$seed")"
             [[ -f "$path" ]] || {
                 printf 'Missing source config: %s\n' "$path" >&2
                 return 2
             }
-        done
+        fi
+        if methods_include independent; then
+            path="$(quant_config_path "$seed")"
+            [[ -f "$path" ]] || {
+                printf 'Missing source config: %s\n' "$path" >&2
+                return 2
+            }
+        fi
+        if methods_include joint_g50; then
+            for path in \
+                "$(joint_drop_config_path "$seed")" \
+                "$(joint_quant_config_path "$seed")"; do
+                [[ -f "$path" ]] || {
+                    printf 'Missing source config: %s\n' "$path" >&2
+                    return 2
+                }
+            done
+        fi
     done
 }
 
@@ -296,24 +384,24 @@ run_eval() {
             sparsity_or_bits="dense"
             ;;
         depth)
-            base_run_id="${RUN_PREFIX}_depth_mistral_s0.25_tasks_seed${seed}"
+            base_run_id="${RUN_PREFIX}_depth_mistral_s${DEPTH_SPARSITY}_tasks_seed${seed}"
             eval_method="lmeval_depth"
-            sparsity_or_bits="depth0.25"
-            drop_config="${SOURCE_RUNS_ROOT}/thesis_medium_depth_mistral_s0.25_g20_o16_seed${seed}/layer_drop_config.txt"
+            sparsity_or_bits="depth${DEPTH_SPARSITY}"
+            drop_config="$(depth_config_path "$seed")"
             ;;
         independent)
-            base_run_id="${RUN_PREFIX}_independent_depth_quant_mistral_s0.25_qproj3.0_tasks_seed${seed}"
+            base_run_id="${RUN_PREFIX}_independent_depth_quant_mistral_s${DEPTH_SPARSITY}_${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_tasks_seed${seed}"
             eval_method="lmeval_independent_depth_quant"
-            sparsity_or_bits="depth0.25+qproj3.0_independent"
-            drop_config="${SOURCE_RUNS_ROOT}/thesis_medium_depth_mistral_s0.25_g20_o16_seed${seed}/layer_drop_config.txt"
-            quant_config="${SOURCE_RUNS_ROOT}/thesis_medium_quant_mistral_qproj3.0_g20_o16_seed${seed}/quant_configuration.txt"
+            sparsity_or_bits="depth${DEPTH_SPARSITY}+${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_independent"
+            drop_config="$(depth_config_path "$seed")"
+            quant_config="$(quant_config_path "$seed")"
             ;;
         joint_g50)
-            base_run_id="${RUN_PREFIX}_joint_g50_mistral_s0.25_qproj3.0_tasks_seed${seed}"
+            base_run_id="${RUN_PREFIX}_joint_g50_mistral_s${DEPTH_SPARSITY}_${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_tasks_seed${seed}"
             eval_method="lmeval_joint_g50"
-            sparsity_or_bits="depth0.25+qproj3.0_joint_g50"
-            drop_config="${SOURCE_RUNS_ROOT}/thesis_compute_matched_joint_mistral_s0.25_qproj3.0_g50_o16_seed${seed}/joint_drop_config.txt"
-            quant_config="${SOURCE_RUNS_ROOT}/thesis_compute_matched_joint_mistral_s0.25_qproj3.0_g50_o16_seed${seed}/joint_quant_config.txt"
+            sparsity_or_bits="depth${DEPTH_SPARSITY}+${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_joint_g50"
+            drop_config="$(joint_drop_config_path "$seed")"
+            quant_config="$(joint_quant_config_path "$seed")"
             ;;
         *)
             printf 'Unsupported method: %s\n' "$method" >&2
