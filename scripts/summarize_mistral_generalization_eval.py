@@ -12,7 +12,7 @@ from typing import Any, Sequence
 
 
 METHOD_ORDER = ("dense", "depth", "independent", "joint_g50")
-METHOD_LABELS = {
+DEFAULT_METHOD_LABELS = {
     "dense": "Dense FP16",
     "depth": "Depth-only",
     "independent": "Independent depth + q_proj quant",
@@ -58,7 +58,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--runs-root", default="results/runs")
     parser.add_argument("--output-dir", default="results")
     parser.add_argument("--run-prefix", default="generalization")
+    parser.add_argument("--output-stem", default="mistral_generalization")
     parser.add_argument("--sequence-length", type=int, default=1024)
+    parser.add_argument("--depth-sparsity", default="0.25")
+    parser.add_argument("--quant-scope-label", default="qproj")
+    parser.add_argument("--target-bitwidth", default="3.0")
     parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
     parser.add_argument(
         "--datasets",
@@ -78,6 +82,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--skip-plots", action="store_true")
     return parser.parse_args(argv)
+
+
+def display_scope_label(quant_scope_label: str) -> str:
+    return "q_proj" if quant_scope_label == "qproj" else quant_scope_label
+
+
+def method_labels(quant_scope_label: str) -> dict[str, str]:
+    if quant_scope_label == "qproj":
+        return dict(DEFAULT_METHOD_LABELS)
+    scope = display_scope_label(quant_scope_label)
+    return {
+        "dense": "Dense FP16",
+        "depth": "Depth-only",
+        "independent": f"Independent depth + {scope} quant",
+        "joint_g50": f"Joint G50 depth + {scope} quant",
+    }
 
 
 def write_csv(
@@ -116,20 +136,25 @@ def run_id_for(
     seed: int,
     run_prefix: str,
     sequence_length: int,
+    depth_sparsity: str,
+    quant_scope_label: str,
+    target_bitwidth: str,
 ) -> str:
     if method == "dense":
         return f"{run_prefix}_dense_mistral_multidataset_seq{sequence_length}_seed0"
     if method == "depth":
-        return f"{run_prefix}_depth_mistral_s0.25_multidataset_seed{seed}"
+        return f"{run_prefix}_depth_mistral_s{depth_sparsity}_multidataset_seed{seed}"
     if method == "independent":
         return (
             f"{run_prefix}_independent_depth_quant_mistral_"
-            f"s0.25_qproj3.0_multidataset_seed{seed}"
+            f"s{depth_sparsity}_{quant_scope_label}{target_bitwidth}_"
+            f"multidataset_seed{seed}"
         )
     if method == "joint_g50":
         return (
             f"{run_prefix}_joint_g50_mistral_"
-            f"s0.25_qproj3.0_multidataset_seed{seed}"
+            f"s{depth_sparsity}_{quant_scope_label}{target_bitwidth}_"
+            f"multidataset_seed{seed}"
         )
     raise ValueError(f"Unsupported method: {method}")
 
@@ -151,16 +176,28 @@ def load_run_rows(
     *,
     run_prefix: str,
     sequence_length: int,
+    depth_sparsity: str,
+    quant_scope_label: str,
+    target_bitwidth: str,
     seeds: Sequence[int],
     datasets: Sequence[str],
     methods: Sequence[str],
     allow_missing: bool,
+    labels: dict[str, str],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for method in methods:
         method_seeds = [0] if method == "dense" else list(seeds)
         for seed in method_seeds:
-            run_id = run_id_for(method, seed, run_prefix, sequence_length)
+            run_id = run_id_for(
+                method,
+                seed,
+                run_prefix,
+                sequence_length,
+                depth_sparsity,
+                quant_scope_label,
+                target_bitwidth,
+            )
             metrics_path = runs_root / run_id / "evaluation_metrics.csv"
             if not metrics_path.is_file():
                 if allow_missing:
@@ -178,7 +215,7 @@ def load_run_rows(
                 rows.append(
                     {
                         "method": method,
-                        "method_label": METHOD_LABELS[method],
+                        "method_label": labels[method],
                         "seed": seed,
                         "run_id": run_id,
                         "dataset": dataset,
@@ -188,7 +225,10 @@ def load_run_rows(
     return rows
 
 
-def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def aggregate_rows(
+    rows: list[dict[str, Any]],
+    labels: dict[str, str],
+) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str], list[float]] = defaultdict(list)
     for row in rows:
         grouped[(row["method"], row["dataset"])].append(float(row["ppl"]))
@@ -203,7 +243,7 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             aggregate.append(
                 {
                     "method": method,
-                    "method_label": METHOD_LABELS[method],
+                    "method_label": labels[method],
                     "dataset": dataset,
                     "runs": len(values),
                     "ppl_mean": mean(values),
@@ -258,6 +298,7 @@ def write_markdown(
     aggregate: list[dict[str, Any]],
     paired: list[dict[str, Any]],
     datasets: Sequence[str],
+    labels: dict[str, str],
 ) -> None:
     by_method_dataset = {
         (row["method"], row["dataset"]): row for row in aggregate
@@ -299,7 +340,7 @@ def write_markdown(
             lines.append(
                 "| {method} | {dataset} | {runs} | {mean} | {std} | "
                 "{min_} | {max_} | {delta} |".format(
-                    method=METHOD_LABELS[method],
+                    method=labels[method],
                     dataset=dataset,
                     runs=row["runs"],
                     mean=fmt(row["ppl_mean"]),
@@ -350,9 +391,8 @@ def write_markdown(
             "the current objective overfits the calibration/evaluation setup and "
             "needs broader calibration data.",
             "- If depth-only is close to or better than the combined methods, the "
-            "next experiment should increase the quantized module scope or adjust "
-            "the compression target, because q_proj-only quantization contributes "
-            "limited compression.",
+            "next experiment should revisit the quantized module scope, the "
+            "compression target, or the search objective.",
             "",
             "## Source Runs",
             "",
@@ -369,7 +409,7 @@ def write_markdown(
         ),
     ):
         lines.append(
-            f"| {METHOD_LABELS[row['method']]} | {row['seed']} | "
+            f"| {labels[row['method']]} | {row['seed']} | "
             f"`{row['run_id']}` | {row['dataset']} | {fmt(row['ppl'])} |"
         )
 
@@ -381,6 +421,7 @@ def write_plot(
     path: Path,
     aggregate: list[dict[str, Any]],
     datasets: Sequence[str],
+    labels: dict[str, str],
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -406,7 +447,7 @@ def write_plot(
             x + (index - (len(METHOD_ORDER) - 1) / 2) * width
             for x in x_positions
         ]
-        ax.bar(offsets, values, width=width, label=METHOD_LABELS[method])
+        ax.bar(offsets, values, width=width, label=labels[method])
 
     ax.set_xticks(x_positions)
     ax.set_xticklabels(observed_datasets)
@@ -424,48 +465,55 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
     runs_root = Path(args.runs_root)
     output_dir = Path(args.output_dir)
+    labels = method_labels(args.quant_scope_label)
     run_rows = load_run_rows(
         runs_root,
         run_prefix=args.run_prefix,
         sequence_length=args.sequence_length,
+        depth_sparsity=args.depth_sparsity,
+        quant_scope_label=args.quant_scope_label,
+        target_bitwidth=args.target_bitwidth,
         seeds=args.seeds,
         datasets=args.datasets,
         methods=args.methods,
         allow_missing=args.allow_missing,
+        labels=labels,
     )
     if not run_rows:
         raise SystemExit("No generalization evaluation rows were found.")
 
-    aggregate = aggregate_rows(run_rows)
+    aggregate = aggregate_rows(run_rows, labels)
     paired = paired_rows(run_rows)
 
     write_csv(
-        output_dir / "mistral_generalization_eval.csv",
+        output_dir / f"{args.output_stem}_eval.csv",
         RUN_COLUMNS,
         run_rows,
     )
     write_csv(
-        output_dir / "mistral_generalization_aggregate.csv",
+        output_dir / f"{args.output_stem}_aggregate.csv",
         AGGREGATE_COLUMNS,
         aggregate,
     )
     write_csv(
-        output_dir / "mistral_generalization_paired_deltas.csv",
+        output_dir / f"{args.output_stem}_paired_deltas.csv",
         PAIRED_COLUMNS,
         paired,
     )
     write_markdown(
-        output_dir / "mistral_generalization_eval.md",
+        output_dir / f"{args.output_stem}_eval.md",
         run_rows,
         aggregate,
         paired,
         args.datasets,
+        labels,
     )
     if not args.skip_plots:
         write_plot(
-            output_dir / "mistral_generalization_eval.png",
+            output_dir / f"{args.output_stem}_eval.png",
             aggregate,
             args.datasets,
+            labels,
         )
 
     print(f"Wrote {len(run_rows)} run rows.")

@@ -11,9 +11,20 @@ SOURCE_RUNS_ROOT="${SOURCE_RUNS_ROOT:-results/runs}"
 RESULTS_RUNS_ROOT="${RESULTS_RUNS_ROOT:-results/runs}"
 OUTPUTS_ROOT="${OUTPUTS_ROOT:-outputs/experiments}"
 EXPERIMENT_LOG="${EXPERIMENT_LOG:-results/experiment_log.csv}"
+SOURCE_PREFIX="${SOURCE_PREFIX:-thesis_medium}"
+DEPTH_SOURCE_PREFIX="${DEPTH_SOURCE_PREFIX:-$SOURCE_PREFIX}"
+QUANT_SOURCE_PREFIX="${QUANT_SOURCE_PREFIX:-$SOURCE_PREFIX}"
+JOINT_SOURCE_PREFIX="${JOINT_SOURCE_PREFIX:-thesis_compute_matched}"
 RUN_PREFIX="${RUN_PREFIX:-generalization}"
+QUANT_SCOPE_LABEL="${QUANT_SCOPE_LABEL:-qproj}"
 SEEDS="${SEEDS:-0 1 2}"
 METHODS="${METHODS:-dense depth independent joint_g50}"
+DEPTH_SPARSITY="${DEPTH_SPARSITY:-0.25}"
+TARGET_BITWIDTH="${TARGET_BITWIDTH:-3.0}"
+SOURCE_GENERATIONS="${SOURCE_GENERATIONS:-20}"
+SOURCE_OFFSPRING="${SOURCE_OFFSPRING:-16}"
+JOINT_GENERATIONS="${JOINT_GENERATIONS:-50}"
+JOINT_OFFSPRING="${JOINT_OFFSPRING:-16}"
 SEQUENCE_LENGTH="${SEQUENCE_LENGTH:-1024}"
 EVAL_TOKENS="${EVAL_TOKENS:-131072}"
 EVAL_DATASETS="${EVAL_DATASETS:-wikitext2 c4 fineweb_edu}"
@@ -30,13 +41,17 @@ Usage: scripts/run_mistral_generalization_eval.sh [--dry-run] [--continue-on-fai
 
 Replay tracked Mistral configurations on multiple evaluation datasets:
   dense       dense FP16 reference, seed 0 only
-  depth       thesis_medium depth-only masks, seeds 0-2
-  independent independently searched depth mask + searched q_proj profile
-  joint_g50   compute-matched joint G50 depth + q_proj profiles
+  depth       depth-only masks, seeds 0-2
+  independent independently searched depth mask + searched quant profile
+  joint_g50   compute-matched joint G50 depth + quant profiles
 
 Default datasets: wikitext2 c4 fineweb_edu
 Default EVAL_TOKENS: 131072. Set EVAL_TOKENS=524288 for a heavier full-scale
 check after the screening run is validated.
+
+The default quantization scope is q_proj for backwards compatibility. Use
+QUANT_SCOPE_LABEL=attention with the attention q/k/v/o database and source
+prefixes to replay broader-scope runs.
 EOF
 }
 
@@ -135,29 +150,102 @@ resolve_run_id() {
     done
 }
 
+methods_include() {
+    local wanted="$1"
+    local method
+    for method in $METHODS; do
+        [[ "$method" == "$wanted" ]] && return 0
+    done
+    return 1
+}
+
+depth_config_path() {
+    local seed="$1"
+    printf '%s/%s_depth_mistral_s%s_g%s_o%s_seed%s/layer_drop_config.txt' \
+        "$SOURCE_RUNS_ROOT" \
+        "$DEPTH_SOURCE_PREFIX" \
+        "$DEPTH_SPARSITY" \
+        "$SOURCE_GENERATIONS" \
+        "$SOURCE_OFFSPRING" \
+        "$seed"
+}
+
+quant_config_path() {
+    local seed="$1"
+    printf '%s/%s_quant_mistral_%s%s_g%s_o%s_seed%s/quant_configuration.txt' \
+        "$SOURCE_RUNS_ROOT" \
+        "$QUANT_SOURCE_PREFIX" \
+        "$QUANT_SCOPE_LABEL" \
+        "$TARGET_BITWIDTH" \
+        "$SOURCE_GENERATIONS" \
+        "$SOURCE_OFFSPRING" \
+        "$seed"
+}
+
+joint_drop_config_path() {
+    local seed="$1"
+    printf '%s/%s_joint_mistral_s%s_%s%s_g%s_o%s_seed%s/joint_drop_config.txt' \
+        "$SOURCE_RUNS_ROOT" \
+        "$JOINT_SOURCE_PREFIX" \
+        "$DEPTH_SPARSITY" \
+        "$QUANT_SCOPE_LABEL" \
+        "$TARGET_BITWIDTH" \
+        "$JOINT_GENERATIONS" \
+        "$JOINT_OFFSPRING" \
+        "$seed"
+}
+
+joint_quant_config_path() {
+    local seed="$1"
+    printf '%s/%s_joint_mistral_s%s_%s%s_g%s_o%s_seed%s/joint_quant_config.txt' \
+        "$SOURCE_RUNS_ROOT" \
+        "$JOINT_SOURCE_PREFIX" \
+        "$DEPTH_SPARSITY" \
+        "$QUANT_SCOPE_LABEL" \
+        "$TARGET_BITWIDTH" \
+        "$JOINT_GENERATIONS" \
+        "$JOINT_OFFSPRING" \
+        "$seed"
+}
+
 validate_inputs() {
     local seed
     local path
     if [[ "$DRY_RUN" == "1" ]]; then
         return
     fi
-    if [[ "$METHODS" == *independent* || "$METHODS" == *joint_g50* ]]; then
+    if methods_include independent || methods_include joint_g50; then
         [[ -d "$QUANT_WEIGHTS_PATH" ]] || {
-            printf 'Missing Mistral q_proj quant database: %s\n' "$QUANT_WEIGHTS_PATH" >&2
+            printf 'Missing Mistral %s quant database: %s\n' \
+                "$QUANT_SCOPE_LABEL" "$QUANT_WEIGHTS_PATH" >&2
             return 2
         }
     fi
     for seed in $SEEDS; do
-        for path in \
-            "${SOURCE_RUNS_ROOT}/thesis_medium_depth_mistral_s0.25_g20_o16_seed${seed}/layer_drop_config.txt" \
-            "${SOURCE_RUNS_ROOT}/thesis_medium_quant_mistral_qproj3.0_g20_o16_seed${seed}/quant_configuration.txt" \
-            "${SOURCE_RUNS_ROOT}/thesis_compute_matched_joint_mistral_s0.25_qproj3.0_g50_o16_seed${seed}/joint_drop_config.txt" \
-            "${SOURCE_RUNS_ROOT}/thesis_compute_matched_joint_mistral_s0.25_qproj3.0_g50_o16_seed${seed}/joint_quant_config.txt"; do
+        if methods_include depth || methods_include independent; then
+            path="$(depth_config_path "$seed")"
             [[ -f "$path" ]] || {
                 printf 'Missing source config: %s\n' "$path" >&2
                 return 2
             }
-        done
+        fi
+        if methods_include independent; then
+            path="$(quant_config_path "$seed")"
+            [[ -f "$path" ]] || {
+                printf 'Missing source config: %s\n' "$path" >&2
+                return 2
+            }
+        fi
+        if methods_include joint_g50; then
+            for path in \
+                "$(joint_drop_config_path "$seed")" \
+                "$(joint_quant_config_path "$seed")"; do
+                [[ -f "$path" ]] || {
+                    printf 'Missing source config: %s\n' "$path" >&2
+                    return 2
+                }
+            done
+        fi
     done
 }
 
@@ -182,26 +270,26 @@ run_eval() {
             sparsity_or_bits="dense"
             ;;
         depth)
-            base_run_id="${RUN_PREFIX}_depth_mistral_s0.25_multidataset_seed${seed}"
+            base_run_id="${RUN_PREFIX}_depth_mistral_s${DEPTH_SPARSITY}_multidataset_seed${seed}"
             eval_method="generalization_depth_eval"
-            sparsity_or_bits="depth0.25"
-            drop_config="${SOURCE_RUNS_ROOT}/thesis_medium_depth_mistral_s0.25_g20_o16_seed${seed}/layer_drop_config.txt"
+            sparsity_or_bits="depth${DEPTH_SPARSITY}"
+            drop_config="$(depth_config_path "$seed")"
             ;;
         independent)
-            base_run_id="${RUN_PREFIX}_independent_depth_quant_mistral_s0.25_qproj3.0_multidataset_seed${seed}"
+            base_run_id="${RUN_PREFIX}_independent_depth_quant_mistral_s${DEPTH_SPARSITY}_${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_multidataset_seed${seed}"
             eval_method="generalization_independent_depth_quant_eval"
-            sparsity_or_bits="depth0.25+qproj3.0_independent"
-            drop_config="${SOURCE_RUNS_ROOT}/thesis_medium_depth_mistral_s0.25_g20_o16_seed${seed}/layer_drop_config.txt"
-            quant_config="${SOURCE_RUNS_ROOT}/thesis_medium_quant_mistral_qproj3.0_g20_o16_seed${seed}/quant_configuration.txt"
+            sparsity_or_bits="depth${DEPTH_SPARSITY}+${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_independent"
+            drop_config="$(depth_config_path "$seed")"
+            quant_config="$(quant_config_path "$seed")"
             quant_weights="$QUANT_WEIGHTS_PATH"
             quant_default_level=3
             ;;
         joint_g50)
-            base_run_id="${RUN_PREFIX}_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed${seed}"
+            base_run_id="${RUN_PREFIX}_joint_g50_mistral_s${DEPTH_SPARSITY}_${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_multidataset_seed${seed}"
             eval_method="generalization_joint_g50_eval"
-            sparsity_or_bits="depth0.25+qproj3.0_joint_g50"
-            drop_config="${SOURCE_RUNS_ROOT}/thesis_compute_matched_joint_mistral_s0.25_qproj3.0_g50_o16_seed${seed}/joint_drop_config.txt"
-            quant_config="${SOURCE_RUNS_ROOT}/thesis_compute_matched_joint_mistral_s0.25_qproj3.0_g50_o16_seed${seed}/joint_quant_config.txt"
+            sparsity_or_bits="depth${DEPTH_SPARSITY}+${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_joint_g50"
+            drop_config="$(joint_drop_config_path "$seed")"
+            quant_config="$(joint_quant_config_path "$seed")"
             quant_weights="$QUANT_WEIGHTS_PATH"
             quant_default_level=3
             ;;

@@ -145,6 +145,102 @@ class SummarizeMistralGeneralizationEvalTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Missing evaluation metrics", result.stderr)
 
+    def test_attention_scope_summary_uses_separate_output_stem(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            runs_root = root / "runs"
+            output_dir = root / "results"
+            datasets = {
+                "wikitext2": 10.0,
+                "c4": 11.0,
+                "fineweb_edu": 12.0,
+            }
+
+            write_metrics(
+                runs_root
+                / "generalization_attention_dense_mistral_multidataset_seq1024_seed0",
+                datasets,
+            )
+            for seed in (0, 1, 2):
+                write_metrics(
+                    runs_root
+                    / (
+                        "generalization_attention_depth_mistral_"
+                        f"s0.25_multidataset_seed{seed}"
+                    ),
+                    {
+                        "wikitext2": 20.0 + seed,
+                        "c4": 30.0 + seed,
+                        "fineweb_edu": 40.0 + seed,
+                    },
+                )
+                write_metrics(
+                    runs_root
+                    / (
+                        "generalization_attention_independent_depth_quant_mistral_"
+                        f"s0.25_attention3.0_multidataset_seed{seed}"
+                    ),
+                    {
+                        "wikitext2": 22.0 + seed,
+                        "c4": 32.0 + seed,
+                        "fineweb_edu": 42.0 + seed,
+                    },
+                )
+                write_metrics(
+                    runs_root
+                    / (
+                        "generalization_attention_joint_g50_mistral_"
+                        f"s0.25_attention3.0_multidataset_seed{seed}"
+                    ),
+                    {
+                        "wikitext2": 21.0 + seed,
+                        "c4": 31.0 + seed,
+                        "fineweb_edu": 41.0 + seed,
+                    },
+                )
+
+            result = subprocess.run(
+                [
+                    str(SCRIPT),
+                    "--runs-root",
+                    str(runs_root),
+                    "--output-dir",
+                    str(output_dir),
+                    "--run-prefix",
+                    "generalization_attention",
+                    "--quant-scope-label",
+                    "attention",
+                    "--output-stem",
+                    "mistral_attention_generalization",
+                    "--skip-plots",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Wrote 30 run rows.", result.stdout)
+            with (
+                output_dir / "mistral_attention_generalization_aggregate.csv"
+            ).open(newline="", encoding="utf-8") as handle:
+                aggregate_rows = list(csv.DictReader(handle))
+            independent = [
+                row
+                for row in aggregate_rows
+                if row["method"] == "independent"
+                and row["dataset"] == "wikitext2"
+            ][0]
+            self.assertEqual(
+                independent["method_label"],
+                "Independent depth + attention quant",
+            )
+            self.assertTrue(
+                (
+                    output_dir / "mistral_attention_generalization_eval.md"
+                ).is_file()
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
