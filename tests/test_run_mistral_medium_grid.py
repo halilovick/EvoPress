@@ -100,6 +100,41 @@ class RunMistralMediumGridTest(unittest.TestCase):
                 result.stdout,
             )
 
+    def test_dry_run_accepts_custom_quant_scope_label(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = subprocess.run(
+                [str(LAUNCHER), "--dry-run"],
+                cwd=REPO_ROOT,
+                env={
+                    **os.environ,
+                    "OUTPUTS_ROOT": str(Path(temp_dir) / "outputs"),
+                    "EXPERIMENT_LOG": str(Path(temp_dir) / "experiment_log.csv"),
+                    "RUN_DENSE": "0",
+                    "METHODS": "quant joint",
+                    "SEEDS": "0",
+                    "QUANT_SCOPE_LABEL": "attention",
+                    "QUANT_WEIGHTS_PATH": "outputs/experiments/quant_db_mistral_attention_bits234/quant_db/Mistral-7B-v0.3/3bit",
+                    "EXPECTED_QUANT_MODULES": "128",
+                    "EXPECTED_QUANT_WEIGHT_FILES": "384",
+                },
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                "thesis_medium_quant_mistral_attention3.0_g20_o16_seed0",
+                result.stdout,
+            )
+            self.assertIn(
+                "thesis_medium_joint_mistral_s0.25_attention3.0_g20_o16_seed0",
+                result.stdout,
+            )
+            self.assertIn(
+                "--quant_weights_path outputs/experiments/quant_db_mistral_attention_bits234/quant_db/Mistral-7B-v0.3/3bit",
+                result.stdout,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

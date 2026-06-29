@@ -12,6 +12,7 @@ RESULTS_RUNS_ROOT="${RESULTS_RUNS_ROOT:-results/runs}"
 EXPERIMENT_LOG="${EXPERIMENT_LOG:-results/experiment_log.csv}"
 RUN_PREFIX="${RUN_PREFIX:-thesis_medium}"
 RUN_SUFFIX="${RUN_SUFFIX:-}"
+QUANT_SCOPE_LABEL="${QUANT_SCOPE_LABEL:-qproj}"
 METHODS="${METHODS:-depth quant joint}"
 SEEDS="${SEEDS:-0 1 2}"
 RUN_DENSE="${RUN_DENSE:-1}"
@@ -56,7 +57,7 @@ Run a thesis-scale Mistral comparison sequentially:
   - depth-only, quant-only, and joint searches for seeds 0, 1, and 2
 
 The default search uses 20 generations, 16 offspring, 32 initial candidates,
-three-stage selection, 25% depth sparsity, and a 3-bit q-projection budget.
+three-stage selection, 25% depth sparsity, and a 3-bit quantization budget.
 Completed structured runs are validated and skipped automatically.
 Interrupted or failed non-empty runs are preserved and retried under the next
 available `_retryN` run identifier.
@@ -300,10 +301,10 @@ run_search() {
             base_run_id="${RUN_PREFIX}_depth_mistral_s${DEPTH_SPARSITY}_g${GENERATIONS}_o${OFFSPRING}_seed${seed}${RUN_SUFFIX}"
             ;;
         quant)
-            base_run_id="${RUN_PREFIX}_quant_mistral_qproj${TARGET_BITWIDTH}_g${GENERATIONS}_o${OFFSPRING}_seed${seed}${RUN_SUFFIX}"
+            base_run_id="${RUN_PREFIX}_quant_mistral_${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_g${GENERATIONS}_o${OFFSPRING}_seed${seed}${RUN_SUFFIX}"
             ;;
         joint)
-            base_run_id="${RUN_PREFIX}_joint_mistral_s${DEPTH_SPARSITY}_qproj${TARGET_BITWIDTH}_g${GENERATIONS}_o${OFFSPRING}_seed${seed}${RUN_SUFFIX}"
+            base_run_id="${RUN_PREFIX}_joint_mistral_s${DEPTH_SPARSITY}_${QUANT_SCOPE_LABEL}${TARGET_BITWIDTH}_g${GENERATIONS}_o${OFFSPRING}_seed${seed}${RUN_SUFFIX}"
             ;;
         *)
             printf 'Unsupported method: %s\n' "$method" >&2
