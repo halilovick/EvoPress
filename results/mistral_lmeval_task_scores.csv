@@ -1,0 +1,31 @@
+method,method_label,seed,run_id,task,metric,score
+dense,Dense FP16,0,lmeval_dense_mistral_tasks_seed0_retry4,arc_easy,"acc_norm,none",0.8009259259259259
+dense,Dense FP16,0,lmeval_dense_mistral_tasks_seed0_retry4,piqa,"acc_norm,none",0.8193688792165397
+dense,Dense FP16,0,lmeval_dense_mistral_tasks_seed0_retry4,winogrande,"acc,none",0.7419100236779794
+depth,Depth-only,0,lmeval_depth_mistral_s0.25_tasks_seed0,arc_easy,"acc_norm,none",0.6069023569023569
+depth,Depth-only,0,lmeval_depth_mistral_s0.25_tasks_seed0,piqa,"acc_norm,none",0.7312295973884657
+depth,Depth-only,0,lmeval_depth_mistral_s0.25_tasks_seed0,winogrande,"acc,none",0.6250986582478295
+depth,Depth-only,1,lmeval_depth_mistral_s0.25_tasks_seed1,arc_easy,"acc_norm,none",0.5635521885521886
+depth,Depth-only,1,lmeval_depth_mistral_s0.25_tasks_seed1,piqa,"acc_norm,none",0.7366702937976061
+depth,Depth-only,1,lmeval_depth_mistral_s0.25_tasks_seed1,winogrande,"acc,none",0.6148382004735596
+depth,Depth-only,2,lmeval_depth_mistral_s0.25_tasks_seed2,arc_easy,"acc_norm,none",0.5925925925925926
+depth,Depth-only,2,lmeval_depth_mistral_s0.25_tasks_seed2,piqa,"acc_norm,none",0.7442872687704026
+depth,Depth-only,2,lmeval_depth_mistral_s0.25_tasks_seed2,winogrande,"acc,none",0.611681136543015
+independent,Independent depth + q_proj quant,0,lmeval_independent_depth_quant_mistral_s0.25_qproj3.0_tasks_seed0,arc_easy,"acc_norm,none",0.6018518518518519
+independent,Independent depth + q_proj quant,0,lmeval_independent_depth_quant_mistral_s0.25_qproj3.0_tasks_seed0,piqa,"acc_norm,none",0.7334058759521219
+independent,Independent depth + q_proj quant,0,lmeval_independent_depth_quant_mistral_s0.25_qproj3.0_tasks_seed0,winogrande,"acc,none",0.6306235201262825
+independent,Independent depth + q_proj quant,1,lmeval_independent_depth_quant_mistral_s0.25_qproj3.0_tasks_seed1,arc_easy,"acc_norm,none",0.5551346801346801
+independent,Independent depth + q_proj quant,1,lmeval_independent_depth_quant_mistral_s0.25_qproj3.0_tasks_seed1,piqa,"acc_norm,none",0.7366702937976061
+independent,Independent depth + q_proj quant,1,lmeval_independent_depth_quant_mistral_s0.25_qproj3.0_tasks_seed1,winogrande,"acc,none",0.6203630623520127
+independent,Independent depth + q_proj quant,2,lmeval_independent_depth_quant_mistral_s0.25_qproj3.0_tasks_seed2,arc_easy,"acc_norm,none",0.5913299663299664
+independent,Independent depth + q_proj quant,2,lmeval_independent_depth_quant_mistral_s0.25_qproj3.0_tasks_seed2,piqa,"acc_norm,none",0.7464635473340587
+independent,Independent depth + q_proj quant,2,lmeval_independent_depth_quant_mistral_s0.25_qproj3.0_tasks_seed2,winogrande,"acc,none",0.6093133385951065
+joint_g50,Joint G50 depth + q_proj quant,0,lmeval_joint_g50_mistral_s0.25_qproj3.0_tasks_seed0_retry4,arc_easy,"acc_norm,none",0.6266835016835017
+joint_g50,Joint G50 depth + q_proj quant,0,lmeval_joint_g50_mistral_s0.25_qproj3.0_tasks_seed0_retry4,piqa,"acc_norm,none",0.7426550598476604
+joint_g50,Joint G50 depth + q_proj quant,0,lmeval_joint_g50_mistral_s0.25_qproj3.0_tasks_seed0_retry4,winogrande,"acc,none",0.6077348066298343
+joint_g50,Joint G50 depth + q_proj quant,1,lmeval_joint_g50_mistral_s0.25_qproj3.0_tasks_seed1,arc_easy,"acc_norm,none",0.5366161616161617
+joint_g50,Joint G50 depth + q_proj quant,1,lmeval_joint_g50_mistral_s0.25_qproj3.0_tasks_seed1,piqa,"acc_norm,none",0.7393906420021763
+joint_g50,Joint G50 depth + q_proj quant,1,lmeval_joint_g50_mistral_s0.25_qproj3.0_tasks_seed1,winogrande,"acc,none",0.606156274664562
+joint_g50,Joint G50 depth + q_proj quant,2,lmeval_joint_g50_mistral_s0.25_qproj3.0_tasks_seed2,arc_easy,"acc_norm,none",0.5753367003367004
+joint_g50,Joint G50 depth + q_proj quant,2,lmeval_joint_g50_mistral_s0.25_qproj3.0_tasks_seed2,piqa,"acc_norm,none",0.735582154515778
+joint_g50,Joint G50 depth + q_proj quant,2,lmeval_joint_g50_mistral_s0.25_qproj3.0_tasks_seed2,winogrande,"acc,none",0.6108918705603789
