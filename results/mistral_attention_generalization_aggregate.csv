@@ -1,0 +1,13 @@
+method,method_label,dataset,runs,ppl_mean,ppl_sample_std,ppl_min,ppl_max
+dense,Dense FP16,c4,1,8.86,,8.86,8.86
+dense,Dense FP16,fineweb_edu,1,7.27,,7.27,7.27
+dense,Dense FP16,wikitext2,1,5.96,,5.96,5.96
+depth,Depth-only,c4,3,14.76,0.8054191455385199,13.97,15.58
+depth,Depth-only,fineweb_edu,3,12.98,0.7597367965289032,12.3,13.8
+depth,Depth-only,wikitext2,3,11.816666666666666,0.6251666444503684,11.2,12.45
+independent,Independent depth + attention quant,c4,3,16.09,1.0601414999895067,15.02,17.14
+independent,Independent depth + attention quant,fineweb_edu,3,14.236666666666666,0.9451102228488126,13.3,15.19
+independent,Independent depth + attention quant,wikitext2,3,13.106666666666666,0.8837043246093872,12.18,13.94
+joint_g50,Joint G50 depth + attention quant,c4,3,15.593333333333334,0.956991814663706,14.81,16.66
+joint_g50,Joint G50 depth + attention quant,fineweb_edu,3,13.783333333333333,0.9584536156399708,12.97,14.84
+joint_g50,Joint G50 depth + attention quant,wikitext2,3,12.67,0.8135723692456619,11.74,13.25

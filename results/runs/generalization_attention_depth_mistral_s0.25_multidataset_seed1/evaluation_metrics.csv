@@ -1,0 +1,4 @@
+run_id,dataset,ppl
+generalization_attention_depth_mistral_s0.25_multidataset_seed1,wikitext2,12.45
+generalization_attention_depth_mistral_s0.25_multidataset_seed1,c4,15.58
+generalization_attention_depth_mistral_s0.25_multidataset_seed1,fineweb_edu,13.80

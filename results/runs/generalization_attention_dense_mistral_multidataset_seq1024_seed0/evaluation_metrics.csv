@@ -1,0 +1,4 @@
+run_id,dataset,ppl
+generalization_attention_dense_mistral_multidataset_seq1024_seed0,wikitext2,5.96
+generalization_attention_dense_mistral_multidataset_seq1024_seed0,c4,8.86
+generalization_attention_dense_mistral_multidataset_seq1024_seed0,fineweb_edu,7.27

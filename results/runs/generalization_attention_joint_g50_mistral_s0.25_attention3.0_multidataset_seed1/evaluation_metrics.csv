@@ -1,0 +1,4 @@
+run_id,dataset,ppl
+generalization_attention_joint_g50_mistral_s0.25_attention3.0_multidataset_seed1,wikitext2,11.74
+generalization_attention_joint_g50_mistral_s0.25_attention3.0_multidataset_seed1,c4,14.81
+generalization_attention_joint_g50_mistral_s0.25_attention3.0_multidataset_seed1,fineweb_edu,12.97
