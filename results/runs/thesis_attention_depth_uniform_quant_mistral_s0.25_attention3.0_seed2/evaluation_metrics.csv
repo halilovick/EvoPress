@@ -1,0 +1,2 @@
+run_id,dataset,ppl
+thesis_attention_depth_uniform_quant_mistral_s0.25_attention3.0_seed2,wikitext2,12.18
