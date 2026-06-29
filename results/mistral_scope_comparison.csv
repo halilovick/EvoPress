@@ -1,0 +1,9 @@
+scope,method,label,compression_ratio,wikitext2_ppl,c4_ppl,fineweb_edu_ppl,lmeval_macro,delta_wikitext2_vs_depth,delta_wikitext2_vs_independent,delta_lmeval_vs_depth,delta_lmeval_vs_independent,notes
+baseline,dense,Dense FP16,1,5.96,8.86,7.34,0.787402,-5.85667,,0.139974,,Uncompressed reference.
+depth,depth,Depth-only 25%,1.31706,11.8167,14.76,12.98,0.647428,0,,0,,Depth pruning baseline reused by both composition scopes.
+q_proj,quant_only,q_proj quant-only,1.06404,5.9375,,,,-5.87917,-6.00917,,,Quant-only search; no multi-dataset or LM-eval run.
+q_proj,independent,Depth + independent q_proj quant,1.40049,11.9467,14.91,13.14,0.64724,0.13,,-0.000188462,,Depth and quantization selected separately.
+q_proj,joint_g50,Joint G50 depth + q_proj quant,1.4003,11.2433,14.3933,12.46,0.642339,-0.573333,-0.703333,-0.00508946,-0.004901,Best q_proj combined search setting.
+attention,quant_only,Attention q/k/v/o quant-only,1.1771,6.1849,,,,-5.63177,-6.92177,,,Quant-only search; no multi-dataset or LM-eval run.
+attention,independent,Depth + independent attention quant,1.54697,13.1067,16.09,14.2367,0.596277,1.29,,-0.0511506,,Compression ratio uses the matched attention joint target; composition eval artifacts do not contain a run_summary.json.
+attention,joint_g50,Joint G50 depth + attention quant,1.54697,12.67,15.5933,13.7833,0.600608,0.853333,-0.436667,-0.0468199,0.00433073,Broader q/k/v/o attention scope at the same depth target.
