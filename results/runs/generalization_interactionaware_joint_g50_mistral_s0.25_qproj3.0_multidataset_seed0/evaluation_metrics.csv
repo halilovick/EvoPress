@@ -1,0 +1,4 @@
+run_id,dataset,ppl
+generalization_interactionaware_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed0,wikitext2,10.90
+generalization_interactionaware_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed0,c4,14.19
+generalization_interactionaware_joint_g50_mistral_s0.25_qproj3.0_multidataset_seed0,fineweb_edu,12.35
