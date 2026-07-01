@@ -1,0 +1,462 @@
+\documentclass[aspectratio=169]{beamer}
+
+\mode<presentation>
+{
+ \usetheme[reversetitle,notitle,noauthor]{Wien}
+}
+
+\usepackage{url}
+\usepackage{graphicx}
+\graphicspath{{./}{./Figures/}{./results/}}
+
+\usepackage{appendixnumberbeamer}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+
+% To avoid a warning from the hyperref package:
+\pdfstringdefDisableCommands{%
+  \def\translate{}%
+}
+
+\definecolor{tuwred}{RGB}{140,0,0}
+\definecolor{darkgreen}{RGB}{0,120,60}
+\definecolor{darkblue}{RGB}{0,70,140}
+\definecolor{darkorange}{RGB}{190,100,0}
+
+\newcommand{\good}[1]{\textcolor{darkgreen}{\textbf{#1}}}
+\newcommand{\warn}[1]{\textcolor{darkorange}{\textbf{#1}}}
+\newcommand{\bad}[1]{\textcolor{tuwred}{\textbf{#1}}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\title[EvoPress Extension]{Extending EvoPress with Joint Multi-Method Compression}
+\subtitle{Supervisor Meeting: Focused Progress Update}
+\author[Kerim Halilovi\'c]{Kerim Halilovi\'c}
+\institute[TU Wien]{TU Wien, Vienna, Austria}
+\date{July 2026}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{What changed since the last meeting?}
+\begin{itemize}
+    \item The main evidence moved from TinyLlama feasibility to \textbf{Mistral-7B experiments}.
+    \item I implemented and tested a joint search pipeline for \textbf{depth pruning + quantization}.
+    \item I compared:
+    \begin{itemize}
+        \item depth-only pruning,
+        \item quantization-only search,
+        \item independent depth + quantization,
+        \item joint depth + quantization search.
+    \end{itemize}
+    \item I evaluated the main results on WikiText2, C4, FineWeb-Edu, and LM-eval tasks.
+    \item The result is promising, but not a simple ``joint search always wins'' story.
+\end{itemize}
+
+\vspace{0.2cm}
+\begin{block}{Current high-level finding}
+Joint search improves perplexity over matched independent compression, but the benefit depends on quantization scope and evaluation metric.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Refined research question}
+\begin{block}{Thesis question}
+Can EvoPress-style evolutionary search optimize \textbf{depth pruning} and \textbf{weight quantization} jointly, and when is this better than applying both methods independently?
+\end{block}
+
+\vspace{0.25cm}
+\textbf{Why this is interesting}
+\begin{itemize}
+    \item Pruning removes complete attention or MLP modules.
+    \item Quantization changes the weights of selected projection modules.
+    \item These two decisions can interact.
+    \item A pruning mask that works well alone may not be the best mask after quantization.
+\end{itemize}
+
+\vspace{0.2cm}
+\begin{block}{More precise framing}
+The thesis is about the \textbf{quality-compression tradeoff} of joint multi-method compression, not about proving that joint search is always superior.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Experimental setup}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{Model and compression}
+\begin{itemize}
+    \item Model: \texttt{mistralai/Mistral-7B-v0.3}
+    \item Depth pruning target: 25\%
+    \item Quantization target: average 3-bit
+    \item Search setting: 50 generations, 16 offspring, 3 seeds
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{Quantization scopes}
+\begin{itemize}
+    \item \texttt{q\_proj}: narrow, lower compression
+    \item \texttt{q/k/v/o}: broader attention scope, higher compression
+\end{itemize}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\textbf{Evaluation}
+\begin{itemize}
+    \item Search fitness: KL divergence against dense model logits
+    \item Reported language-model metrics:
+    \begin{itemize}
+        \item WikiText2 PPL
+        \item C4 PPL
+        \item FineWeb-Edu PPL
+    \end{itemize}
+    \item Downstream checks:
+    \begin{itemize}
+        \item ARC-Easy
+        \item PIQA
+        \item Winogrande
+    \end{itemize}
+\end{itemize}
+\end{column}
+\end{columns}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Independent vs. joint search}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{Independent compression}
+\begin{center}
+\texttt{depth search}\\
+$\downarrow$\\
+\texttt{quant search}\\
+$\downarrow$\\
+\texttt{combine configs}\\
+$\downarrow$\\
+\texttt{evaluate final model}
+\end{center}
+\end{block}
+
+\textbf{Problem:} each method is optimized mostly as if the other method did not exist.
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{block}{Joint compression}
+\begin{center}
+\texttt{candidate = depth mask + quant assignment}\\
+$\downarrow$\\
+\texttt{mutate candidate}\\
+$\downarrow$\\
+\texttt{evaluate combined model}\\
+$\downarrow$\\
+\texttt{select next parent}
+\end{center}
+\end{block}
+
+\textbf{Goal:} select configurations that work well after both compression methods are active.
+\end{column}
+\end{columns}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{What is one joint-search candidate?}
+\begin{block}{One candidate represents one compressed model}
+A joint-search candidate contains both compression decisions at the same time.
+\end{block}
+
+\vspace{0.2cm}
+\textbf{Part 1: depth mask}
+\begin{itemize}
+    \item For each transformer block, decide whether attention is kept or dropped.
+    \item For each transformer block, decide whether the MLP is kept or dropped.
+\end{itemize}
+
+\vspace{0.15cm}
+\textbf{Part 2: quantization assignment}
+\begin{itemize}
+    \item For selected projection modules, assign a bitwidth such as 2, 3, or 4 bits.
+    \item The assignment must satisfy the target average bitwidth budget.
+\end{itemize}
+
+\vspace{0.15cm}
+\begin{block}{Key point}
+The candidate is not evaluated as pruning alone or quantization alone. It is evaluated as one final depth-pruned and quantized model.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{One generation of joint search}
+\begin{enumerate}
+    \item Start from the current parent candidate.
+    \item Copy it to create offspring candidates.
+    \item Mutate each offspring.
+    \begin{itemize}
+        \item In the main runs, each offspring mutates either the depth mask or the quantization assignment.
+        \item The choice is random (50/50).
+        \item If the depth mask changes, the active quantization budget is repaired so the average bitwidth stays valid.
+        \item New interaction-aware mode: mutate depth, repair active quant budget, then adjust quantization on touched active layers.
+    \end{itemize}
+    \item Assemble the compressed candidate.
+    \item Evaluate fitness using KL divergence against the dense model.
+    \item Keep the best candidate as the next parent.
+\end{enumerate}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Main Mistral-7B results}
+\begin{table}
+\centering
+\scriptsize
+\begin{tabular}{llrrrr}
+\toprule
+Scope & Method & Compression & WikiText2 & C4 & FineWeb-Edu \\
+\midrule
+baseline & Dense FP16 & 1.000x & \good{5.960} & \good{8.860} & \good{7.340} \\
+depth & Depth-only 25\% & 1.317x & 11.817 & 14.760 & 12.980 \\
+\texttt{q\_proj} & Independent depth + quant & 1.400x & 11.947 & 14.910 & 13.140 \\
+\texttt{q\_proj} & Joint depth + quant & 1.400x & \good{11.243} & \good{14.393} & \good{12.460} \\
+attention & Independent depth + quant & 1.547x & 13.107 & 16.090 & 14.237 \\
+attention & Joint depth + quant & 1.547x & \good{12.670} & \good{15.593} & \good{13.783} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.2cm}
+\begin{block}{Main result}
+At matched compression, joint search improves perplexity over independent composition for both quantization scopes.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{What improved, and what did not?}
+\begin{table}
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Comparison & WikiText2 & C4 & FineWeb-Edu & LM-eval macro \\
+\midrule
+\texttt{q\_proj}: joint $-$ independent & \good{-0.703} & \good{-0.517} & \good{-0.680} & \warn{-0.005} \\
+attention: joint $-$ independent & \good{-0.437} & \good{-0.497} & \good{-0.453} & \good{+0.004} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.25cm}
+\textbf{Interpretation}
+\begin{itemize}
+    \item The strongest evidence is on perplexity.
+    \item \texttt{q\_proj} joint search is the best current quality-compression point.
+    \item Attention-scope joint search gives higher compression, but lower quality.
+    \item LM-eval is more mixed, so I should not overclaim downstream improvement.
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{What the results support}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{Supported}
+\begin{itemize}
+    \item Joint search is executable on Mistral-7B.
+    \item Joint search improves matched independent compression in PPL.
+    \item The effect appears on WikiText2, C4, and FineWeb-Edu.
+    \item Quantization scope strongly changes the tradeoff.
+\end{itemize}
+\end{block}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{block}{Not supported}
+\begin{itemize}
+    \item Not evidence that joint search always wins.
+    \item Not yet evidence for full all-linear Mistral compression.
+    \item Not a clear downstream task improvement for every setting.
+    \item Not yet evidence that the new interaction-aware mutation improves results; it still needs matched experiments.
+\end{itemize}
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{How this shapes the thesis}
+\begin{block}{Careful thesis claim}
+Joint EvoPress-style depth+quantization search improves matched independent compression in perplexity, but the benefit depends on quantization scope and evaluation metric.
+\end{block}
+
+\vspace{0.25cm}
+\textbf{Thesis direction}
+\begin{itemize}
+    \item Extend EvoPress from single-method compression to joint multi-method compression.
+    \item Study how pruning masks and quantization assignments interact.
+    \item Compare independent and joint optimization under matched compression.
+    \item Explain the compression-quality tradeoff rather than only reporting best numbers.
+\end{itemize}
+
+\vspace{0.2cm}
+\begin{block}{Open question for the thesis}
+Can the new interaction-aware mutation become the concrete algorithmic contribution beyond simply combining two existing compression methods?
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Next steps}
+\begin{enumerate}
+    \item Understand and document the joint-search code path in detail.
+    \item Write a clear algorithm description:
+    \begin{itemize}
+        \item candidate representation,
+        \item mutation operators,
+        \item budget repair,
+        \item fitness evaluation,
+        \item selection.
+    \end{itemize}
+    \item Run stronger independent vs. joint searches with larger search budgets.
+    \item Compare across multiple seeds.
+    \item Test the new interaction-aware mutation against the standard joint search.
+    \item Continue thesis writing around methodology and results.
+\end{enumerate}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\appendix
+
+\begin{frame}{Backup: hardware and reproducibility}
+\begin{itemize}
+    \item Datalab hardware varied: T4, V100, and A40 depending on availability.
+    \item The main practical limit is still the 16 GB container CPU RAM cap.
+    \item Full Mistral SparseGPT-style database generation was not practical in this environment.
+    \item Mistral quantization databases were feasible with restricted scopes.
+    \item Structured outputs now include:
+    \begin{itemize}
+        \item \texttt{experiment\_log.csv},
+        \item \texttt{run\_summary.json},
+        \item \texttt{generation\_log.csv},
+        \item \texttt{final\_candidate.json}.
+    \end{itemize}
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Backup: depth pruning and simple baselines}
+\begin{itemize}
+    \item Mistral depth pruning was first validated independently.
+    \item Random and late-layer dropping were added as cheap baselines.
+    \item These simple baselines often produced much worse or collapsed PPL.
+    \item This supports that module choice matters, not only the number of dropped modules.
+\end{itemize}
+
+\vspace{0.25cm}
+\begin{block}{Why this matters}
+The joint experiments build on a meaningful depth-pruning search, not on arbitrary layer removal.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Backup: TinyLlama feasibility}
+\begin{itemize}
+    \item TinyLlama was used to debug the sparse, quantization, and combined pipelines faster.
+    \item Sparse database generation and sparse search completed on TinyLlama.
+    \item Quantization databases completed for:
+    \begin{itemize}
+        \item \texttt{q\_proj},
+        \item attention projections,
+        \item all transformer projections.
+    \end{itemize}
+    \item These runs were useful engineering evidence, but Mistral-7B is now the main thesis evidence.
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Backup: search variants and ablations}
+\begin{table}
+\centering
+\small
+\begin{tabular}{lrrl}
+\toprule
+Variant & Runs & Mean WikiText2 & Interpretation \\
+\midrule
+Standard joint G50 & 3 & 11.242 & clean fully evaluated result \\
+Joint-aware mutation & 3 & 11.547 & mixed; not clearly better \\
+Fixed mutation strength & 3 & 11.211 & slightly better W2; not fully evaluated \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.2cm}
+\begin{itemize}
+    \item These variants are useful for understanding the search behavior.
+    \item They should stay secondary until they are evaluated with the same breadth as the main result.
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Backup: LM-eval detail}
+\begin{table}
+\centering
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Method & ARC-Easy & PIQA & Winogrande & Macro \\
+\midrule
+Dense FP16 & \good{0.801} & \good{0.819} & \good{0.742} & \good{0.787} \\
+Depth-only 25\% & 0.588 & 0.737 & 0.618 & 0.648 \\
+\texttt{q\_proj} independent & 0.583 & 0.739 & 0.620 & 0.647 \\
+\texttt{q\_proj} joint & 0.580 & 0.739 & 0.608 & 0.642 \\
+Attention independent & 0.535 & 0.696 & 0.558 & 0.596 \\
+Attention joint & 0.534 & 0.707 & 0.561 & 0.601 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.15cm}
+\textbf{Takeaway:} task accuracy is more mixed than perplexity, so the thesis should distinguish PPL gains from downstream task gains.
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Backup: generated summaries}
+\small
+\begin{itemize}
+    \item Main consolidated result:
+    \begin{itemize}
+        \item \texttt{results/mistral\_scope\_comparison.md}
+        \item \texttt{results/mistral\_scope\_comparison.csv}
+    \end{itemize}
+    \item Generalization summaries:
+    \begin{itemize}
+        \item \texttt{results/mistral\_generalization\_aggregate.csv}
+        \item \texttt{results/mistral\_attention\_generalization\_aggregate.csv}
+    \end{itemize}
+    \item LM-eval summaries:
+    \begin{itemize}
+        \item \texttt{results/mistral\_lmeval\_aggregate.csv}
+        \item \texttt{results/mistral\_attention\_lmeval\_aggregate.csv}
+    \end{itemize}
+\end{itemize}
+\end{frame}
+
+\end{document}

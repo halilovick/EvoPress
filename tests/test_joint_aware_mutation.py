@@ -7,6 +7,7 @@ from evo_joint_search import (
     adaptive_mutation_strength,
     candidate_bits,
     coarse_to_fine_mutation_strength,
+    mutate_interaction_aware_candidate,
     mutate_joint_aware_candidate,
     selected_candidate_metadata,
 )
@@ -132,6 +133,62 @@ class JointAwareMutationTest(unittest.TestCase):
         ]
         self.assertEqual(len(restored), 1)
         self.assertNotEqual(offspring["quant"][0][restored[0]], 3)
+
+        active_weights = 2 * 16
+        active_bits = candidate_bits(
+            model,
+            grouped_layer_names,
+            offspring["quant"],
+            offspring["drop"],
+        )
+        self.assertEqual(active_bits / active_weights, 3.0)
+
+    def test_interaction_aware_mutation_changes_depth_and_quantization(self) -> None:
+        layer_names = [
+            f"model.layers.{layer_id}.self_attn.q_proj"
+            for layer_id in range(4)
+        ]
+        grouped_layer_names = [layer_names]
+        model = FakeModel(layer_names)
+        candidate = {
+            "drop": {
+                "attn": [False, False, True, True],
+                "mlp": [False, False, True, True],
+            },
+            "quant": [[3, 3, 3, 3]],
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            quant_root = Path(temp_dir)
+            for layer_name in layer_names:
+                module_dir = quant_root / layer_name
+                module_dir.mkdir(parents=True)
+                for bitwidth in (2, 3, 4):
+                    (module_dir / f"{bitwidth}.pth").touch()
+
+            random.seed(11)
+            offspring, details = mutate_interaction_aware_candidate(
+                model,
+                grouped_layer_names,
+                str(quant_root),
+                candidate,
+                target_bitwidth=3.0,
+                step_size=1,
+                drop_entire_block=True,
+                max_drop_mutations=1,
+                quant_mutations=1,
+            )
+
+        self.assertEqual(sum(offspring["drop"]["attn"]), 2)
+        self.assertEqual(sum(offspring["drop"]["mlp"]), 2)
+        self.assertNotEqual(offspring["drop"], candidate["drop"])
+        self.assertNotEqual(offspring["quant"], candidate["quant"])
+        self.assertGreater(details["depth_mask_entries_changed"], 0)
+        self.assertGreater(details["quant_assignments_changed"], 0)
+        self.assertTrue(
+            details["preferred_quant_exchange_used"]
+            or details["fallback_quant_exchange_used"]
+        )
 
         active_weights = 2 * 16
         active_bits = candidate_bits(
