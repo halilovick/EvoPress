@@ -1,0 +1,2 @@
+depth_label,quant_label,depth_source,quant_source,wiki2_ppl,c4_ppl,fineweb_ppl,compression_ratio,active_params,avg_active_bitwidth,budget_valid_before_repair,budget_repaired,repair_num_changes,status,error_message
+interaction_aware,standard_joint,results/runs/thesis_interactionaware_joint_mistral_s0.25_qproj3.0_g50_o16_seed0/final_candidate.json,results/runs/thesis_compute_matched_joint_mistral_s0.25_qproj3.0_g50_o16_seed0/final_candidate.json,10.796875,14.1015625,12.203125,1.400303557622533,5503193088,3.0,False,True,1,completed,
