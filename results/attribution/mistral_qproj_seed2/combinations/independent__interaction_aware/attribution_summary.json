@@ -1,0 +1,119 @@
+{
+  "active_quant_budget": true,
+  "artifacts": {
+    "combined_candidate": "results/attribution/mistral_qproj_seed2/combinations/independent__interaction_aware/combined_candidate.json",
+    "compression_metrics": "results/attribution/mistral_qproj_seed2/combinations/independent__interaction_aware/compression_metrics.json",
+    "metrics": "results/attribution/mistral_qproj_seed2/combinations/independent__interaction_aware/metrics.json",
+    "summary": "results/attribution/mistral_qproj_seed2/combinations/independent__interaction_aware/attribution_summary.json"
+  },
+  "base_model": "mistralai/Mistral-7B-v0.3",
+  "compression_metrics": {
+    "final_metrics": {
+      "active_parameters": 5503193088,
+      "average_bitwidth_active": 3.0,
+      "average_bitwidth_searched": 2.90625,
+      "average_bitwidth_total": 11.426093944348155,
+      "estimated_compression_ratio": 1.400303557622533
+    },
+    "model_size_statistics": {
+      "dense_dtype_bits": 16,
+      "dense_weight_memory_mb": 13824.5078125,
+      "estimated_compression_ratio": 1.400303557622533,
+      "estimated_weight_memory_mb": 9872.5078125,
+      "model_size_note": "The estimated model size is theoretical and based on assigned bitwidths. It does not represent the on-disk size of the current floating-point reconstruction database.",
+      "nonsearched_weight_memory_mb": 9728.5078125,
+      "searched_weight_memory_mb": 144.0
+    },
+    "parameter_statistics": {
+      "active_nonsearched_parameters": 5100539904,
+      "active_parameter_ratio": 0.7592681023341133,
+      "active_parameters": 5503193088,
+      "active_parameters_note": "Theoretical parameters used by inference. Parameters in bypassed attention/MLP modules are excluded even though their tensors remain allocated.",
+      "dropped_parameters": 1744830464,
+      "nonsearched_parameters": 6711152640,
+      "searched_parameters_active": 402653184,
+      "searched_parameters_dense": 536870912,
+      "total_parameters_dense": 7248023552
+    },
+    "quantization_statistics": {
+      "active_quantized_module_count": 24,
+      "average_bitwidth_active": 3.0,
+      "average_bitwidth_by_projection_type": {
+        "q_proj": 3.0
+      },
+      "average_bitwidth_searched": 2.90625,
+      "average_bitwidth_total": 11.426093944348155,
+      "bitwidth_by_module": {
+        "model.layers.0.self_attn.q_proj": 4,
+        "model.layers.1.self_attn.q_proj": 2,
+        "model.layers.10.self_attn.q_proj": 4,
+        "model.layers.11.self_attn.q_proj": 2,
+        "model.layers.12.self_attn.q_proj": 2,
+        "model.layers.13.self_attn.q_proj": 3,
+        "model.layers.14.self_attn.q_proj": 4,
+        "model.layers.15.self_attn.q_proj": 3,
+        "model.layers.16.self_attn.q_proj": 2,
+        "model.layers.17.self_attn.q_proj": 2,
+        "model.layers.18.self_attn.q_proj": 4,
+        "model.layers.19.self_attn.q_proj": 4,
+        "model.layers.2.self_attn.q_proj": 3,
+        "model.layers.20.self_attn.q_proj": 3,
+        "model.layers.21.self_attn.q_proj": 2,
+        "model.layers.22.self_attn.q_proj": 3,
+        "model.layers.23.self_attn.q_proj": 4,
+        "model.layers.24.self_attn.q_proj": 2,
+        "model.layers.25.self_attn.q_proj": 3,
+        "model.layers.26.self_attn.q_proj": 3,
+        "model.layers.27.self_attn.q_proj": 4,
+        "model.layers.28.self_attn.q_proj": 2,
+        "model.layers.29.self_attn.q_proj": 2,
+        "model.layers.3.self_attn.q_proj": 4,
+        "model.layers.30.self_attn.q_proj": 2,
+        "model.layers.31.self_attn.q_proj": 2,
+        "model.layers.4.self_attn.q_proj": 4,
+        "model.layers.5.self_attn.q_proj": 4,
+        "model.layers.6.self_attn.q_proj": 2,
+        "model.layers.7.self_attn.q_proj": 3,
+        "model.layers.8.self_attn.q_proj": 2,
+        "model.layers.9.self_attn.q_proj": 3
+      },
+      "bitwidth_histogram": {
+        "2": 8,
+        "3": 8,
+        "4": 8
+      },
+      "bitwidth_parameter_histogram": {
+        "2": 134217728,
+        "3": 134217728,
+        "4": 134217728
+      },
+      "quantized_module_count": 32
+    }
+  },
+  "depth_candidate_type": "depth_only",
+  "depth_label": "independent",
+  "depth_source": "results/runs/thesis_medium_depth_mistral_s0.25_g20_o16_seed2/final_candidate.json",
+  "error_message": "",
+  "metrics": {
+    "c4": 14.296875,
+    "fineweb_edu": 12.6953125,
+    "wikitext2": 11.46875
+  },
+  "quant_candidate_type": "joint_depth_quant",
+  "quant_db": "outputs/experiments/quant_db_mistral_qproj_debug_bits234/quant_db/Mistral-7B-v0.3/3bit",
+  "quant_label": "interaction_aware",
+  "quant_source": "results/runs/thesis_interactionaware_joint_mistral_s0.25_qproj3.0_g50_o16_seed2/final_candidate.json",
+  "repair_active_budget": true,
+  "repair_details": {
+    "active_average_bitwidth_after_repair": 3.0,
+    "active_average_bitwidth_before_repair": 3.0833333333333335,
+    "active_quant_budget": true,
+    "budget_checked": true,
+    "budget_repaired": true,
+    "budget_valid_before_repair": false,
+    "repair_num_changes": 2,
+    "target_bitwidth": 3.0
+  },
+  "status": "completed",
+  "target_bitwidth": 3.0
+}

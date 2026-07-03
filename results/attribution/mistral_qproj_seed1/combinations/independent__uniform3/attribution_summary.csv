@@ -1,0 +1,2 @@
+depth_label,quant_label,depth_source,quant_source,wiki2_ppl,c4_ppl,fineweb_ppl,compression_ratio,active_params,avg_active_bitwidth,budget_valid_before_repair,budget_repaired,repair_num_changes,status,error_message
+independent,uniform3,results/runs/thesis_medium_depth_mistral_s0.25_g20_o16_seed1/final_candidate.json,uniform:3,12.5234375,15.671875,14.046875,1.400303557622533,5503193088,3.0,True,False,0,completed,

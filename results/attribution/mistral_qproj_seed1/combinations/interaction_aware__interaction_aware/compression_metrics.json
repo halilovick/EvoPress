@@ -1,0 +1,76 @@
+{
+  "model_size_statistics": {
+    "dense_dtype_bits": 16,
+    "dense_weight_memory_mb": 13824.5078125,
+    "estimated_compression_ratio": 1.400303557622533,
+    "estimated_weight_memory_mb": 9872.5078125,
+    "model_size_note": "The estimated model size is theoretical and based on assigned bitwidths. It does not represent the on-disk size of the current floating-point reconstruction database.",
+    "nonsearched_weight_memory_mb": 9728.5078125,
+    "searched_weight_memory_mb": 144.0
+  },
+  "parameter_statistics": {
+    "active_nonsearched_parameters": 5100539904,
+    "active_parameter_ratio": 0.7592681023341133,
+    "active_parameters": 5503193088,
+    "active_parameters_note": "Theoretical parameters used by inference. Parameters in bypassed attention/MLP modules are excluded even though their tensors remain allocated.",
+    "dropped_parameters": 1744830464,
+    "nonsearched_parameters": 6711152640,
+    "searched_parameters_active": 402653184,
+    "searched_parameters_dense": 536870912,
+    "total_parameters_dense": 7248023552
+  },
+  "quantization_statistics": {
+    "active_quantized_module_count": 24,
+    "average_bitwidth_active": 3.0,
+    "average_bitwidth_by_projection_type": {
+      "q_proj": 3.0
+    },
+    "average_bitwidth_searched": 3.03125,
+    "average_bitwidth_total": 11.426093944348155,
+    "bitwidth_by_module": {
+      "model.layers.0.self_attn.q_proj": 2,
+      "model.layers.1.self_attn.q_proj": 2,
+      "model.layers.10.self_attn.q_proj": 2,
+      "model.layers.11.self_attn.q_proj": 2,
+      "model.layers.12.self_attn.q_proj": 4,
+      "model.layers.13.self_attn.q_proj": 4,
+      "model.layers.14.self_attn.q_proj": 4,
+      "model.layers.15.self_attn.q_proj": 3,
+      "model.layers.16.self_attn.q_proj": 4,
+      "model.layers.17.self_attn.q_proj": 3,
+      "model.layers.18.self_attn.q_proj": 4,
+      "model.layers.19.self_attn.q_proj": 3,
+      "model.layers.2.self_attn.q_proj": 2,
+      "model.layers.20.self_attn.q_proj": 3,
+      "model.layers.21.self_attn.q_proj": 3,
+      "model.layers.22.self_attn.q_proj": 3,
+      "model.layers.23.self_attn.q_proj": 2,
+      "model.layers.24.self_attn.q_proj": 4,
+      "model.layers.25.self_attn.q_proj": 4,
+      "model.layers.26.self_attn.q_proj": 2,
+      "model.layers.27.self_attn.q_proj": 3,
+      "model.layers.28.self_attn.q_proj": 3,
+      "model.layers.29.self_attn.q_proj": 3,
+      "model.layers.3.self_attn.q_proj": 3,
+      "model.layers.30.self_attn.q_proj": 4,
+      "model.layers.31.self_attn.q_proj": 3,
+      "model.layers.4.self_attn.q_proj": 4,
+      "model.layers.5.self_attn.q_proj": 2,
+      "model.layers.6.self_attn.q_proj": 4,
+      "model.layers.7.self_attn.q_proj": 2,
+      "model.layers.8.self_attn.q_proj": 3,
+      "model.layers.9.self_attn.q_proj": 3
+    },
+    "bitwidth_histogram": {
+      "2": 7,
+      "3": 10,
+      "4": 7
+    },
+    "bitwidth_parameter_histogram": {
+      "2": 117440512,
+      "3": 167772160,
+      "4": 117440512
+    },
+    "quantized_module_count": 32
+  }
+}
