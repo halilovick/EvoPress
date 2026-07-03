@@ -1,0 +1,2 @@
+depth_label,quant_label,depth_source,quant_source,wiki2_ppl,c4_ppl,fineweb_ppl,compression_ratio,active_params,avg_active_bitwidth,budget_valid_before_repair,budget_repaired,repair_num_changes,status,error_message
+independent,attention_independent,results/runs/thesis_medium_depth_mistral_s0.25_g20_o16_seed0/final_candidate.json,results/runs/thesis_attention_quant_mistral_attention3.0_g20_o16_seed0/final_candidate.json,13.171875,16.046875,14.21875,1.5469698122081734,5503193088,3.0,False,True,2,completed,
