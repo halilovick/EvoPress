@@ -5,7 +5,7 @@ import math
 import os
 import random
 import re
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -34,6 +34,25 @@ from src.run_reporting import (
     flatten_quant_state,
     module_name,
     peak_gpu_memory,
+)
+from src.sequential_search import (
+    DEPTH_FIRST_MODES,
+    QUANT_FIRST_MODES,
+    SEQUENTIAL_MODES,
+    build_sequential_summary_metadata,
+    changed_quant_gene_names,
+    enumerate_legal_fixed_quant_depth_swaps,
+    generate_exact_feasible_depth_states,
+    load_stage1_depth_candidate,
+    load_stage1_quant_candidate,
+    mutate_fixed_quant_depth_candidate,
+    resolve_stage1_artifacts,
+    sequential_mode_metadata,
+    stable_json_hash,
+    validate_active_quant_budget,
+    validate_depth_counts,
+    validate_frozen_component,
+    validate_sequential_cli,
 )
 
 
@@ -686,7 +705,7 @@ def mutate_interaction_aware_candidate(
     return offspring, details
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Prototype joint EvoPress search: depth pruning + quantization.")
 
     parser.add_argument("--model_name_or_path", required=True, type=str)
@@ -797,20 +816,60 @@ def parse_args():
     parser.add_argument("--seed", default=0, type=int)
 
     parser.add_argument("--output_dir", default="./outputs/joint_search_tiny")
-
-    return parser.parse_args()
-
-
-def main():
-    args = parse_args()
-    reporter = RunReporter(
-        args.output_dir,
-        search_type="joint_depth_quant",
-        repo_root=os.path.dirname(os.path.abspath(__file__)),
+    parser.add_argument(
+        "--sequential_mode",
+        default="none",
+        choices=SEQUENTIAL_MODES,
+        help=(
+            "Optional stage-two initialization/freezing policy. The default "
+            "'none' preserves the existing joint-search behavior."
+        ),
+    )
+    parser.add_argument(
+        "--stage1_run_dir",
+        default=None,
+        help="Completed depth-only or quant-only run containing final_candidate.json.",
+    )
+    parser.add_argument(
+        "--stage1_candidate",
+        default=None,
+        help="Direct path to a structured stage-one final_candidate.json.",
+    )
+    parser.add_argument(
+        "--sequential_quant_initialization_policy",
+        default="strict",
+        choices=["strict", "repair"],
+        help=(
+            "Quantization-first initialization policy. 'repair' is allowed "
+            "only for quant_to_joint_warm."
+        ),
+    )
+    parser.add_argument(
+        "--max_initialization_attempts",
+        default=100000,
+        type=int,
+        help=(
+            "Bound for random initialization attempts or exact-feasibility "
+            "search states."
+        ),
+    )
+    parser.add_argument(
+        "--max_offspring_attempts",
+        default=10000,
+        type=int,
+        help="Maximum mutation proposals used to construct one generation's unique offspring.",
     )
 
-    assert len(args.survivors_per_selection) == len(args.tokens_per_selection)
-    assert args.survivors_per_selection[-1] == 1
+    return parser.parse_args(argv)
+
+
+def validate_joint_search_args(args):
+    if len(args.survivors_per_selection) != len(args.tokens_per_selection):
+        raise ValueError(
+            "--survivors_per_selection and --tokens_per_selection must have equal lengths."
+        )
+    if args.survivors_per_selection[-1] != 1:
+        raise ValueError("The final selection stage must have one survivor.")
     if args.active_quant_budget and args.group_rule != "size":
         raise ValueError("--active_quant_budget requires --group_rule size.")
     if args.joint_mutation_mode == "interaction_aware" and not args.active_quant_budget:
@@ -849,6 +908,22 @@ def main():
             "--coarse_to_fine_start_strength must be greater than or equal "
             "to --coarse_to_fine_end_strength."
         )
+    validate_sequential_cli(args)
+
+
+def main():
+    args = parse_args()
+    validate_joint_search_args(args)
+    stage1_artifacts = (
+        resolve_stage1_artifacts(args.stage1_run_dir, args.stage1_candidate)
+        if args.sequential_mode != "none"
+        else None
+    )
+    reporter = RunReporter(
+        args.output_dir,
+        search_type="joint_depth_quant",
+        repo_root=os.path.dirname(os.path.abspath(__file__)),
+    )
 
     fix_seed(args.seed)
 
@@ -941,33 +1016,198 @@ def main():
     full_quantizable_weights = quantizable_weights(model, grouped_layer_names)
     print(f"Quant budget scope: {'active' if args.active_quant_budget else 'all'}")
     print(f"Joint mutation mode: {args.joint_mutation_mode}")
+    print(f"Sequential mode: {args.sequential_mode}")
+
+    stage1_import = None
+    if args.sequential_mode in DEPTH_FIRST_MODES:
+        stage1_import = load_stage1_depth_candidate(
+            stage1_artifacts,
+            expected_model_name=args.model_name_or_path,
+            num_layers=total_blocks,
+            drop_count=blocks_to_remove,
+            drop_entire_block=args.drop_entire_block,
+        )
+    elif args.sequential_mode in QUANT_FIRST_MODES:
+        stage1_import = load_stage1_quant_candidate(
+            stage1_artifacts,
+            expected_model_name=args.model_name_or_path,
+            num_layers=total_blocks,
+            grouped_layer_names=grouped_layer_names,
+            group_rule=args.group_rule,
+            target_bitwidth=args.target_bitwidth,
+            quant_weights_path=args.quant_weights_path,
+        )
 
     # Initial joint population.
     initial_candidates = []
-    while len(initial_candidates) < args.initially_generated:
-        candidate = {
-            "drop": make_random_drop_state(total_blocks, blocks_to_remove, args.drop_entire_block),
-            "quant": make_initial_quant_state(
-                model,
-                grouped_layer_names,
-                args.quant_weights_path,
-                args.target_bitwidth,
-            ),
-        }
+    initialization_attempts = 0
+    initial_repair_changed_gene_names = []
+    if args.sequential_mode == "none":
+        while len(initial_candidates) < args.initially_generated:
+            initialization_attempts += 1
+            if initialization_attempts > args.max_initialization_attempts:
+                raise RuntimeError(
+                    "Unable to generate requested unique initial candidates: "
+                    f"requested={args.initially_generated}, "
+                    f"generated={len(initial_candidates)}, "
+                    f"attempts={initialization_attempts - 1}, "
+                    f"sequential_mode={args.sequential_mode}."
+                )
+            candidate = {
+                "drop": make_random_drop_state(
+                    total_blocks,
+                    blocks_to_remove,
+                    args.drop_entire_block,
+                ),
+                "quant": make_initial_quant_state(
+                    model,
+                    grouped_layer_names,
+                    args.quant_weights_path,
+                    args.target_bitwidth,
+                ),
+            }
+            if args.active_quant_budget:
+                candidate["quant"] = repair_active_quant_budget(
+                    grouped_layer_names,
+                    args.quant_weights_path,
+                    candidate["quant"],
+                    candidate["drop"],
+                    args.target_bitwidth,
+                    args.step_size,
+                )
+
+            if candidate in initial_candidates:
+                continue
+            initial_candidates.append(candidate)
+
+    elif args.sequential_mode in DEPTH_FIRST_MODES:
+        initial_quant = make_initial_quant_state(
+            model,
+            grouped_layer_names,
+            args.quant_weights_path,
+            args.target_bitwidth,
+        )
+        repaired_quant = copy.deepcopy(initial_quant)
         if args.active_quant_budget:
-            candidate["quant"] = repair_active_quant_budget(
+            repaired_quant = repair_active_quant_budget(
                 grouped_layer_names,
                 args.quant_weights_path,
-                candidate["quant"],
-                candidate["drop"],
+                repaired_quant,
+                stage1_import.component,
                 args.target_bitwidth,
                 args.step_size,
             )
+        initial_repair_changed_gene_names = changed_quant_gene_names(
+            grouped_layer_names,
+            initial_quant,
+            repaired_quant,
+        )
+        candidate = {
+            "drop": copy.deepcopy(stage1_import.component),
+            "quant": repaired_quant,
+        }
+        validate_depth_counts(
+            candidate["drop"],
+            total_blocks,
+            blocks_to_remove,
+            args.drop_entire_block,
+        )
+        if args.active_quant_budget:
+            validate_active_quant_budget(
+                grouped_layer_names,
+                candidate["quant"],
+                candidate["drop"],
+                args.target_bitwidth,
+            )
+        validate_frozen_component(candidate, stage1_import.component, "depth")
+        initial_candidates = [candidate]
 
-        if candidate in initial_candidates:
-            continue
+    elif (
+        args.sequential_mode in QUANT_FIRST_MODES
+        and args.sequential_quant_initialization_policy == "strict"
+    ):
+        feasible_depth_states = generate_exact_feasible_depth_states(
+            grouped_layer_names,
+            stage1_import.component,
+            num_layers=total_blocks,
+            drop_count=blocks_to_remove,
+            target_bitwidth=args.target_bitwidth,
+            drop_entire_block=args.drop_entire_block,
+            requested_candidates=args.initially_generated,
+            max_states=args.max_initialization_attempts,
+        )
+        initial_candidates = [
+            {
+                "drop": copy.deepcopy(drop_state),
+                "quant": copy.deepcopy(stage1_import.component),
+            }
+            for drop_state in feasible_depth_states
+        ]
 
-        initial_candidates.append(candidate)
+    elif args.sequential_mode == "quant_to_joint_warm":
+        while len(initial_candidates) < args.initially_generated:
+            initialization_attempts += 1
+            if initialization_attempts > args.max_initialization_attempts:
+                raise RuntimeError(
+                    "Unable to generate requested repaired quantization-first "
+                    "initial candidates: "
+                    f"requested={args.initially_generated}, "
+                    f"generated={len(initial_candidates)}, "
+                    f"attempts={initialization_attempts - 1}, "
+                    f"sequential_mode={args.sequential_mode}."
+                )
+            drop_state = make_random_drop_state(
+                total_blocks,
+                blocks_to_remove,
+                args.drop_entire_block,
+            )
+            candidate = {
+                "drop": drop_state,
+                "quant": repair_active_quant_budget(
+                    grouped_layer_names,
+                    args.quant_weights_path,
+                    copy.deepcopy(stage1_import.component),
+                    drop_state,
+                    args.target_bitwidth,
+                    args.step_size,
+                ),
+            }
+            validate_active_quant_budget(
+                grouped_layer_names,
+                candidate["quant"],
+                candidate["drop"],
+                args.target_bitwidth,
+            )
+            if candidate in initial_candidates:
+                continue
+            initial_candidates.append(candidate)
+    else:
+        raise ValueError(f"Unsupported sequential mode: {args.sequential_mode}")
+
+    for candidate in initial_candidates:
+        validate_depth_counts(
+            candidate["drop"],
+            total_blocks,
+            blocks_to_remove,
+            args.drop_entire_block,
+        )
+        if args.sequential_mode != "none" and args.active_quant_budget:
+            validate_active_quant_budget(
+                grouped_layer_names,
+                candidate["quant"],
+                candidate["drop"],
+                args.target_bitwidth,
+            )
+        if args.sequential_mode == "depth_to_quant_frozen":
+            validate_frozen_component(candidate, stage1_import.component, "depth")
+        if args.sequential_mode in QUANT_FIRST_MODES and (
+            args.sequential_quant_initialization_policy == "strict"
+        ):
+            validate_frozen_component(
+                candidate,
+                stage1_import.component,
+                "quantization",
+            )
 
     population, train_fitnesses = selection(
         model=model,
@@ -984,6 +1224,34 @@ def main():
 
     parent = population[0]
     train_fitness = train_fitnesses[0]
+    initial_parent = copy.deepcopy(parent)
+    if (
+        args.sequential_mode == "quant_to_joint_warm"
+        and args.sequential_quant_initialization_policy == "repair"
+    ):
+        initial_repair_changed_gene_names = changed_quant_gene_names(
+            grouped_layer_names,
+            stage1_import.component,
+            parent["quant"],
+        )
+    if args.sequential_mode in DEPTH_FIRST_MODES:
+        validate_frozen_component(parent, stage1_import.component, "depth")
+    if args.sequential_mode in QUANT_FIRST_MODES and (
+        args.sequential_quant_initialization_policy == "strict"
+    ):
+        validate_frozen_component(parent, stage1_import.component, "quantization")
+
+    initial_fixed_quant_legal_swap_count = None
+    if args.sequential_mode == "quant_to_depth_frozen":
+        initial_fixed_quant_legal_swap_count = len(
+            enumerate_legal_fixed_quant_depth_swaps(
+                parent["drop"],
+                grouped_layer_names,
+                parent["quant"],
+                target_bitwidth=args.target_bitwidth,
+                drop_entire_block=args.drop_entire_block,
+            )
+        )
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -1051,26 +1319,53 @@ def main():
             "quantization": 0,
             "joint_aware": 0,
             "interaction_aware": 0,
+            "sequential_quantization": 0,
+            "fixed_quant_depth": 0,
         }
         depth_change_totals = {
             "depth": 0,
             "quantization": 0,
             "joint_aware": 0,
             "interaction_aware": 0,
+            "sequential_quantization": 0,
+            "fixed_quant_depth": 0,
         }
         quant_change_totals = {
             "depth": 0,
             "quantization": 0,
             "joint_aware": 0,
             "interaction_aware": 0,
+            "sequential_quantization": 0,
+            "fixed_quant_depth": 0,
         }
         interaction_aware_totals = {
             "budget_repair_quant_changes": 0,
             "preferred_quant_exchanges_used": 0,
             "fallback_quant_exchanges_used": 0,
         }
+        offspring_attempts = 0
+        no_op_mutations = 0
+        duplicate_candidates = 0
+        infeasible_candidates = 0
+        fixed_quant_legal_swap_counts = []
 
         while len(offspring_list) < args.offspring:
+            offspring_attempts += 1
+            if offspring_attempts > args.max_offspring_attempts:
+                raise RuntimeError(
+                    "Unable to generate requested unique offspring within the "
+                    "configured bound: "
+                    f"requested={args.offspring}, "
+                    f"generated={len(offspring_list)}, "
+                    f"attempts={offspring_attempts - 1}, "
+                    f"no_op_mutations={no_op_mutations}, "
+                    f"duplicate_candidates={duplicate_candidates}, "
+                    f"infeasible_candidates={infeasible_candidates}, "
+                    f"sequential_mode={args.sequential_mode}, "
+                    f"frozen_component={sequential_mode_metadata(args.sequential_mode)[2]}, "
+                    "fixed_quant_legal_swap_count="
+                    f"{fixed_quant_legal_swap_counts[-1] if fixed_quant_legal_swap_counts else None}."
+                )
             offspring = copy.deepcopy(parent)
             interaction_details = None
 
@@ -1078,7 +1373,33 @@ def main():
                 args.joint_aware_mutation
                 and random.random() < args.joint_aware_probability
             )
-            if args.joint_mutation_mode == "interaction_aware":
+            if args.sequential_mode == "depth_to_quant_frozen":
+                mutation_type = "sequential_quantization"
+                for _ in range(quant_mutation_count):
+                    offspring["quant"] = mutate_quant_state(
+                        model,
+                        grouped_layer_names,
+                        args.quant_weights_path,
+                        offspring["quant"],
+                        args.step_size,
+                        offspring["drop"] if args.active_quant_budget else None,
+                    )
+            elif args.sequential_mode == "quant_to_depth_frozen":
+                mutation_type = "fixed_quant_depth"
+                offspring, fixed_quant_details = mutate_fixed_quant_depth_candidate(
+                    offspring,
+                    grouped_layer_names,
+                    target_bitwidth=args.target_bitwidth,
+                    drop_entire_block=args.drop_entire_block,
+                    max_mutations=depth_mutation_limit,
+                )
+                fixed_quant_legal_swap_counts.append(
+                    fixed_quant_details["legal_swap_count"]
+                )
+                if offspring is None:
+                    no_op_mutations += 1
+                    continue
+            elif args.joint_mutation_mode == "interaction_aware":
                 mutation_type = "interaction_aware"
                 offspring, interaction_details = mutate_interaction_aware_candidate(
                     model,
@@ -1130,7 +1451,38 @@ def main():
                         offspring["drop"] if args.active_quant_budget else None,
                     )
 
-            if offspring in offspring_list or offspring == parent:
+            if args.sequential_mode != "none":
+                validate_depth_counts(
+                    offspring["drop"],
+                    total_blocks,
+                    blocks_to_remove,
+                    args.drop_entire_block,
+                )
+                if args.active_quant_budget:
+                    validate_active_quant_budget(
+                        grouped_layer_names,
+                        offspring["quant"],
+                        offspring["drop"],
+                        args.target_bitwidth,
+                    )
+                if args.sequential_mode == "depth_to_quant_frozen":
+                    validate_frozen_component(
+                        offspring,
+                        stage1_import.component,
+                        "depth",
+                    )
+                elif args.sequential_mode == "quant_to_depth_frozen":
+                    validate_frozen_component(
+                        offspring,
+                        stage1_import.component,
+                        "quantization",
+                    )
+
+            if offspring == parent:
+                no_op_mutations += 1
+                continue
+            if offspring in offspring_list:
+                duplicate_candidates += 1
                 continue
 
             offspring_list.append(offspring)
@@ -1180,6 +1532,33 @@ def main():
                 candidate_pool,
                 mutation_type_pool,
             )
+            if args.sequential_mode != "none":
+                for survivor in offspring_list:
+                    validate_depth_counts(
+                        survivor["drop"],
+                        total_blocks,
+                        blocks_to_remove,
+                        args.drop_entire_block,
+                    )
+                    if args.active_quant_budget:
+                        validate_active_quant_budget(
+                            grouped_layer_names,
+                            survivor["quant"],
+                            survivor["drop"],
+                            args.target_bitwidth,
+                        )
+                    if args.sequential_mode == "depth_to_quant_frozen":
+                        validate_frozen_component(
+                            survivor,
+                            stage1_import.component,
+                            "depth",
+                        )
+                    elif args.sequential_mode == "quant_to_depth_frozen":
+                        validate_frozen_component(
+                            survivor,
+                            stage1_import.component,
+                            "quantization",
+                        )
 
         parent = offspring_list[0]
         train_fitness = train_fitnesses[0]
@@ -1205,7 +1584,11 @@ def main():
             generation_bitwidths,
         )
         survivors = list(args.survivors_per_selection)
-        if args.joint_mutation_mode == "interaction_aware":
+        if args.sequential_mode == "depth_to_quant_frozen":
+            mutation_summary_type = "sequential_quantization_only"
+        elif args.sequential_mode == "quant_to_depth_frozen":
+            mutation_summary_type = "sequential_fixed_quant_depth_only"
+        elif args.joint_mutation_mode == "interaction_aware":
             mutation_summary_type = "interaction_aware_depth_quantization"
         elif args.joint_aware_mutation:
             mutation_summary_type = "joint_aware_depth_quantization"
@@ -1251,7 +1634,12 @@ def main():
                 "dropped_mlp_count": generation_depth_details["dropped_mlp_count"],
                 "mutation_summary": {
                     "type": mutation_summary_type,
+                    "sequential_mode": args.sequential_mode,
                     "joint_mutation_mode": args.joint_mutation_mode,
+                    "parent_before_generation_hash": stable_json_hash(
+                        generation_parent
+                    ),
+                    "parent_after_generation_hash": stable_json_hash(parent),
                     "generated_offspring_by_type": mutation_counts,
                     "depth_mask_entries_changed_by_type": depth_change_totals,
                     "quant_assignments_changed_by_type": quant_change_totals,
@@ -1262,6 +1650,15 @@ def main():
                         quant_change_totals.values()
                     ),
                     "interaction_aware_details": interaction_aware_totals,
+                    "offspring_generation": {
+                        "attempts": offspring_attempts,
+                        "no_op_mutations": no_op_mutations,
+                        "duplicate_candidates": duplicate_candidates,
+                        "infeasible_candidates": infeasible_candidates,
+                        "fixed_quant_legal_swap_counts": (
+                            fixed_quant_legal_swap_counts
+                        ),
+                    },
                     "maximum_depth_mutations_per_offspring": depth_mutation_limit,
                     "quantization_step_size": args.step_size,
                     "quantization_mutations_per_offspring": quant_mutation_count,
@@ -1298,6 +1695,37 @@ def main():
                 "runtime_seconds_cumulative": reporter.runtime_seconds(),
                 "peak_gpu_memory_mb": peak_gpu_memory()[0],
             }
+        )
+
+    final_depth_counts_valid = validate_depth_counts(
+        parent["drop"],
+        total_blocks,
+        blocks_to_remove,
+        args.drop_entire_block,
+    )
+    final_active_budget_valid = None
+    if args.active_quant_budget:
+        final_active_budget_valid = validate_active_quant_budget(
+            grouped_layer_names,
+            parent["quant"],
+            parent["drop"],
+            args.target_bitwidth,
+        )
+    if args.sequential_mode == "depth_to_quant_frozen":
+        validate_frozen_component(parent, stage1_import.component, "depth")
+    elif args.sequential_mode == "quant_to_depth_frozen":
+        validate_frozen_component(parent, stage1_import.component, "quantization")
+
+    final_fixed_quant_legal_swap_count = None
+    if args.sequential_mode == "quant_to_depth_frozen":
+        final_fixed_quant_legal_swap_count = len(
+            enumerate_legal_fixed_quant_depth_swaps(
+                parent["drop"],
+                grouped_layer_names,
+                parent["quant"],
+                target_bitwidth=args.target_bitwidth,
+                drop_entire_block=args.drop_entire_block,
+            )
         )
 
     # Save final joint configuration.
@@ -1372,6 +1800,25 @@ def main():
         parent,
     )
     final_candidate_path = reporter.write_final_candidate(final_candidate)
+    sequential_summary = build_sequential_summary_metadata(
+        mode=args.sequential_mode,
+        stage1_import=stage1_import,
+        quant_initialization_policy=(
+            args.sequential_quant_initialization_policy
+        ),
+        initial_repair_changed_gene_names=initial_repair_changed_gene_names,
+        initial_candidate_count=len(initial_candidates),
+        initial_parent=initial_parent,
+        final_parent=parent,
+        initial_fixed_quant_legal_swap_count=(
+            initial_fixed_quant_legal_swap_count
+        ),
+        final_fixed_quant_legal_swap_count=(
+            final_fixed_quant_legal_swap_count
+        ),
+        active_budget_valid=final_active_budget_valid,
+        depth_counts_valid=final_depth_counts_valid,
+    )
     reporter.write_summary(
         model_name=args.model_name_or_path,
         dataset_calibration=args.calibration_data,
@@ -1390,6 +1837,10 @@ def main():
             "eval_tokens_loaded_by_dataset": eval_tokens_by_dataset,
             "eval_every": args.eval_every,
             "seed": args.seed,
+            "sequential_mode": args.sequential_mode,
+            "max_initialization_attempts": args.max_initialization_attempts,
+            "max_offspring_attempts": args.max_offspring_attempts,
+            "initial_candidates_evaluated": len(initial_candidates),
         },
         compression_config={
             "target_depth_sparsity": args.drop_sparsity,
@@ -1443,7 +1894,11 @@ def main():
             "depth_config_path": os.path.join(args.output_dir, "joint_drop_config.txt"),
             "quant_config_path": os.path.join(args.output_dir, "joint_quant_config.txt"),
             "stdout_log_path": os.path.join(args.output_dir, "run.log"),
+            "stage1_candidate_path": (
+                stage1_import.candidate_path if stage1_import else None
+            ),
         },
+        extra_summary=sequential_summary,
     )
 
 

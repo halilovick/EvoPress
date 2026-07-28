@@ -498,6 +498,7 @@ class RunReporter:
         quantization_statistics: Mapping[str, Any],
         model_size_statistics: Mapping[str, Any],
         artifacts: Mapping[str, Any],
+        extra_summary: Mapping[str, Any] | None = None,
     ) -> str | None:
         if not self.enabled or self.output_dir is None:
             return None
@@ -546,6 +547,14 @@ class RunReporter:
             "artifacts": dict(artifacts),
             "metric_definitions": METRIC_DEFINITIONS,
         }
+        if extra_summary:
+            overlapping_keys = sorted(set(summary).intersection(extra_summary))
+            if overlapping_keys:
+                raise ValueError(
+                    "Extra summary fields cannot replace standard fields: "
+                    f"{overlapping_keys}"
+                )
+            summary.update(dict(extra_summary))
         path = self.output_dir / "run_summary.json"
         write_json(path, summary)
         return str(path)

@@ -171,6 +171,10 @@ class RunReportingTest(unittest.TestCase):
                     "config_path": str(run_dir / "joint_config.json"),
                     "stdout_log_path": str(run_dir / "run.log"),
                 },
+                extra_summary={
+                    "sequential_mode": "depth_to_quant_frozen",
+                    "frozen_depth_unchanged": True,
+                },
             )
 
             runtime_file = run_dir / "runtime.txt"
@@ -227,6 +231,11 @@ class RunReportingTest(unittest.TestCase):
 
             summary = json.loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["final_metrics"]["active_parameters"], 240)
+            self.assertEqual(
+                summary["sequential_mode"],
+                "depth_to_quant_frozen",
+            )
+            self.assertTrue(summary["frozen_depth_unchanged"])
             self.assertEqual(summary["depth_statistics"]["dropped_attention_count"], 1)
             self.assertEqual(summary["final_metrics"]["runtime_seconds"], 12.0)
             self.assertEqual(summary["final_metrics"]["peak_cpu_memory_mb"], 1536.0)

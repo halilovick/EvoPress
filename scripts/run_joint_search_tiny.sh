@@ -49,6 +49,12 @@ OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUTS_ROOT}/${RUN_ID}}"
 DRY_RUN="${DRY_RUN:-0}"
 MEMORY_POLL_INTERVAL_SECONDS="${MEMORY_POLL_INTERVAL_SECONDS:-5}"
 CHECK_RUNTIME_DEPENDENCIES="${CHECK_RUNTIME_DEPENDENCIES:-1}"
+SEQUENTIAL_MODE="${SEQUENTIAL_MODE:-none}"
+STAGE1_RUN_DIR="${STAGE1_RUN_DIR:-}"
+STAGE1_CANDIDATE="${STAGE1_CANDIDATE:-}"
+SEQUENTIAL_QUANT_INITIALIZATION_POLICY="${SEQUENTIAL_QUANT_INITIALIZATION_POLICY:-strict}"
+MAX_INITIALIZATION_ATTEMPTS="${MAX_INITIALIZATION_ATTEMPTS:-100000}"
+MAX_OFFSPRING_ATTEMPTS="${MAX_OFFSPRING_ATTEMPTS:-10000}"
 
 read -r -a EVAL_DATASETS_ARGS <<< "$EVAL_DATASETS"
 read -r -a SURVIVORS_PER_SELECTION_ARGS <<< "$SURVIVORS_PER_SELECTION"
@@ -72,6 +78,7 @@ Defaults:
   JOINT_MUTATION_MODE=standard
   JOINT_AWARE_MUTATION=0
   ADAPTIVE_MUTATION=0
+  SEQUENTIAL_MODE=none
 
 Examples:
   scripts/run_joint_search_tiny.sh --dry-run
@@ -167,6 +174,20 @@ if [[ "$COARSE_TO_FINE_MUTATION" == "1" ]]; then
         --coarse_to_fine_end_strength "$COARSE_TO_FINE_END_STRENGTH"
     )
 fi
+if [[ "$SEQUENTIAL_MODE" != "none" ]]; then
+    COMMAND+=(
+        --sequential_mode "$SEQUENTIAL_MODE"
+        --sequential_quant_initialization_policy "$SEQUENTIAL_QUANT_INITIALIZATION_POLICY"
+        --max_initialization_attempts "$MAX_INITIALIZATION_ATTEMPTS"
+        --max_offspring_attempts "$MAX_OFFSPRING_ATTEMPTS"
+    )
+    if [[ -n "$STAGE1_RUN_DIR" ]]; then
+        COMMAND+=(--stage1_run_dir "$STAGE1_RUN_DIR")
+    fi
+    if [[ -n "$STAGE1_CANDIDATE" ]]; then
+        COMMAND+=(--stage1_candidate "$STAGE1_CANDIDATE")
+    fi
+fi
 
 directory_has_files() {
     [[ -d "$1" ]] && [[ -n "$(find "$1" -mindepth 1 -maxdepth 1 -print -quit)" ]]
@@ -214,6 +235,42 @@ validate_configuration() {
     fi
     if ((COARSE_TO_FINE_START_STRENGTH < COARSE_TO_FINE_END_STRENGTH)); then
         printf 'COARSE_TO_FINE_START_STRENGTH must be at least COARSE_TO_FINE_END_STRENGTH.\n' >&2
+        return 2
+    fi
+    case "$SEQUENTIAL_MODE" in
+        none|depth_to_quant_frozen|depth_to_joint_warm|quant_to_depth_frozen|quant_to_joint_warm)
+            ;;
+        *)
+            printf 'Unsupported SEQUENTIAL_MODE: %s\n' "$SEQUENTIAL_MODE" >&2
+            return 2
+            ;;
+    esac
+    if [[ "$SEQUENTIAL_MODE" == "none" ]]; then
+        if [[ -n "$STAGE1_RUN_DIR" || -n "$STAGE1_CANDIDATE" ]]; then
+            printf 'Stage-one source requires a non-none SEQUENTIAL_MODE.\n' >&2
+            return 2
+        fi
+    elif [[ -n "$STAGE1_RUN_DIR" && -n "$STAGE1_CANDIDATE" ]] ||
+         [[ -z "$STAGE1_RUN_DIR" && -z "$STAGE1_CANDIDATE" ]]; then
+        printf 'Sequential mode requires exactly one of STAGE1_RUN_DIR or STAGE1_CANDIDATE.\n' >&2
+        return 2
+    fi
+    if [[ "$SEQUENTIAL_MODE" == "depth_to_quant_frozen" ||
+          "$SEQUENTIAL_MODE" == "quant_to_depth_frozen" ]]; then
+        if [[ "$JOINT_MUTATION_MODE" != "standard" || "$JOINT_AWARE_MUTATION" == "1" ]]; then
+            printf 'Frozen sequential modes reject interaction-aware and joint-aware mutation.\n' >&2
+            return 2
+        fi
+    fi
+    if [[ "$SEQUENTIAL_MODE" == quant_to_* ]]; then
+        if [[ "$ACTIVE_QUANT_BUDGET" != "1" || "$GROUP_RULE" != "size" ]]; then
+            printf 'Quantization-first sequential modes require ACTIVE_QUANT_BUDGET=1 and GROUP_RULE=size.\n' >&2
+            return 2
+        fi
+    fi
+    if [[ "$SEQUENTIAL_QUANT_INITIALIZATION_POLICY" == "repair" &&
+          "$SEQUENTIAL_MODE" != "quant_to_joint_warm" ]]; then
+        printf 'Repair initialization is allowed only for quant_to_joint_warm.\n' >&2
         return 2
     fi
 }
@@ -424,6 +481,10 @@ START_TIME="$(date +%s)"
     printf 'coarse_to_fine_mutation=%s\n' "$COARSE_TO_FINE_MUTATION"
     printf 'coarse_to_fine_start_strength=%s\n' "$COARSE_TO_FINE_START_STRENGTH"
     printf 'coarse_to_fine_end_strength=%s\n' "$COARSE_TO_FINE_END_STRENGTH"
+    printf 'sequential_mode=%s\n' "$SEQUENTIAL_MODE"
+    printf 'stage1_run_dir=%s\n' "$STAGE1_RUN_DIR"
+    printf 'stage1_candidate=%s\n' "$STAGE1_CANDIDATE"
+    printf 'sequential_quant_initialization_policy=%s\n' "$SEQUENTIAL_QUANT_INITIALIZATION_POLICY"
     printf 'started_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     printf 'command_file=%s\n' "$COMMAND_FILE"
     printf 'memory_samples_file=%s\n' "$MEMORY_SAMPLES_FILE"
@@ -492,7 +553,7 @@ if [[ "$JOINT_AWARE_MUTATION" == "1" ]]; then
 fi
 
 STATUS=completed
-NOTES="last_successful_step=final_evaluation; quant_weights_path=${QUANT_WEIGHTS_PATH}; drop_sparsity=${DROP_SPARSITY}; target_bitwidth=${TARGET_BITWIDTH}; active_quant_budget=${ACTIVE_QUANT_BUDGET}; joint_mutation_mode=${JOINT_MUTATION_MODE}; joint_aware_mutation=${JOINT_AWARE_MUTATION}; joint_aware_probability=${EFFECTIVE_JOINT_AWARE_PROBABILITY}; adaptive_mutation=${ADAPTIVE_MUTATION}; adaptive_mutation_patience=${ADAPTIVE_MUTATION_PATIENCE}; adaptive_mutation_max_strength=${ADAPTIVE_MUTATION_MAX_STRENGTH}; coarse_to_fine_mutation=${COARSE_TO_FINE_MUTATION}; coarse_to_fine_start_strength=${COARSE_TO_FINE_START_STRENGTH}; coarse_to_fine_end_strength=${COARSE_TO_FINE_END_STRENGTH}; actual_average_bitwidth=${FINAL_QUANT_BIT_AVERAGE}; dropped_attn_modules=${DROPPED_ATTN_MODULES}; dropped_mlp_modules=${DROPPED_MLP_MODULES}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
+NOTES="last_successful_step=final_evaluation; quant_weights_path=${QUANT_WEIGHTS_PATH}; drop_sparsity=${DROP_SPARSITY}; target_bitwidth=${TARGET_BITWIDTH}; active_quant_budget=${ACTIVE_QUANT_BUDGET}; sequential_mode=${SEQUENTIAL_MODE}; stage1_run_dir=${STAGE1_RUN_DIR}; stage1_candidate=${STAGE1_CANDIDATE}; joint_mutation_mode=${JOINT_MUTATION_MODE}; joint_aware_mutation=${JOINT_AWARE_MUTATION}; joint_aware_probability=${EFFECTIVE_JOINT_AWARE_PROBABILITY}; adaptive_mutation=${ADAPTIVE_MUTATION}; adaptive_mutation_patience=${ADAPTIVE_MUTATION_PATIENCE}; adaptive_mutation_max_strength=${ADAPTIVE_MUTATION_MAX_STRENGTH}; coarse_to_fine_mutation=${COARSE_TO_FINE_MUTATION}; coarse_to_fine_start_strength=${COARSE_TO_FINE_START_STRENGTH}; coarse_to_fine_end_strength=${COARSE_TO_FINE_END_STRENGTH}; actual_average_bitwidth=${FINAL_QUANT_BIT_AVERAGE}; dropped_attn_modules=${DROPPED_ATTN_MODULES}; dropped_mlp_modules=${DROPPED_MLP_MODULES}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
 FINAL_EXIT_CODE=0
 
 if [[ "$RUN_EXIT_CODE" != "0" ]]; then

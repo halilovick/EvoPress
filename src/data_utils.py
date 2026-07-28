@@ -4,10 +4,20 @@ from tqdm import trange
 from typing import Iterable, List
 
 import torch
-from datasets import load_dataset
 from transformers import AutoTokenizer
 
 from src.dist_utils import is_main, print_on_main
+
+
+def load_dataset(*args, **kwargs):
+    """Import datasets lazily so algorithm unit tests do not need that package."""
+    try:
+        from datasets import load_dataset as huggingface_load_dataset
+    except ModuleNotFoundError as error:
+        raise ModuleNotFoundError(
+            "The 'datasets' package is required when calibration data is loaded."
+        ) from error
+    return huggingface_load_dataset(*args, **kwargs)
 
 
 # We advise against using this data loading method as it introduces bias towards shorter sequences
