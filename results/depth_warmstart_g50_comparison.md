@@ -38,40 +38,62 @@ Delta is `method PPL − baseline PPL`; negative values favor the method named f
 
 ## Early Versus Late Convergence
 
-The periodic PPL checkpoints are incomplete for standard mutation; inspect the convergence CSV.
+Under standard mutation, the warm-start delta is -1.081 PPL after 20 completed generations and +0.081 after generation 50; the early warm-start advantage reverses by generation 50.
 
-The periodic PPL checkpoints are incomplete for interaction-aware mutation; inspect the convergence CSV.
+Under interaction-aware mutation, the warm-start delta is -0.753 PPL after 20 completed generations and +0.086 after generation 50; the early warm-start advantage reverses by generation 50.
 
-The four generated convergence views show the same trajectories against generation, cumulative stage-two candidate evaluations, cumulative stage-two fitness-token exposures, and cumulative stage-two runtime.
+The four generated convergence views show the same trajectories against completed generations, cumulative stage-two candidate evaluations, cumulative stage-two fitness-token exposures, and cumulative stage-two runtime.
+
+The source log evaluates the parent before each generation's mutation but writes it on the row numbered for that generation. Accordingly, logged row 1 is the initialized parent (zero completed generations), logged rows 6, 11, ..., 46 are the parents after 5, 10, ..., 45 completed generations, and the final point uses the post-generation-50 metrics from `run_summary.json`.
 
 ### Mean Checkpoints
 
-| Condition | Generation | Best KL fitness | WikiText2 PPL |
+| Condition | Completed generations | Best KL fitness | WikiText2 PPL |
 | --- | ---: | ---: | ---: |
-| Standard initialization + standard mutation | 5 | 1.0264 |  |
-| Standard initialization + standard mutation | 10 | 0.8646 |  |
-| Standard initialization + standard mutation | 20 | 0.7371 |  |
-| Standard initialization + standard mutation | 30 | 0.6833 |  |
-| Standard initialization + standard mutation | 40 | 0.6646 |  |
+| Standard initialization + standard mutation | 0 | 1.2744 | 23.333 |
+| Standard initialization + standard mutation | 5 | 0.9813 | 15.828 |
+| Standard initialization + standard mutation | 10 | 0.8366 | 13.711 |
+| Standard initialization + standard mutation | 15 | 0.7557 | 12.661 |
+| Standard initialization + standard mutation | 20 | 0.7352 | 12.607 |
+| Standard initialization + standard mutation | 25 | 0.7065 | 12.289 |
+| Standard initialization + standard mutation | 30 | 0.6826 | 11.938 |
+| Standard initialization + standard mutation | 35 | 0.6753 | 11.878 |
+| Standard initialization + standard mutation | 40 | 0.6564 | 11.656 |
+| Standard initialization + standard mutation | 45 | 0.6209 | 11.292 |
 | Standard initialization + standard mutation | 50 | 0.6128 | 11.242 |
-| Depth→Joint warm start + standard mutation | 5 | 0.6740 |  |
-| Depth→Joint warm start + standard mutation | 10 | 0.6712 |  |
-| Depth→Joint warm start + standard mutation | 20 | 0.6421 |  |
-| Depth→Joint warm start + standard mutation | 30 | 0.6299 |  |
-| Depth→Joint warm start + standard mutation | 40 | 0.6227 |  |
-| Depth→Joint warm start + standard mutation | 50 | 0.6151 | 11.323 |
-| Standard initialization + interaction-aware mutation | 5 | 0.9067 |  |
-| Standard initialization + interaction-aware mutation | 10 | 0.8195 |  |
-| Standard initialization + interaction-aware mutation | 20 | 0.7173 |  |
-| Standard initialization + interaction-aware mutation | 30 | 0.6351 |  |
-| Standard initialization + interaction-aware mutation | 40 | 0.6211 |  |
-| Standard initialization + interaction-aware mutation | 50 | 0.6089 | 11.086 |
-| Depth→Joint warm start + interaction-aware mutation | 5 | 0.6484 |  |
-| Depth→Joint warm start + interaction-aware mutation | 10 | 0.6283 |  |
-| Depth→Joint warm start + interaction-aware mutation | 20 | 0.6247 |  |
-| Depth→Joint warm start + interaction-aware mutation | 30 | 0.6239 |  |
-| Depth→Joint warm start + interaction-aware mutation | 40 | 0.6143 |  |
-| Depth→Joint warm start + interaction-aware mutation | 50 | 0.6120 | 11.172 |
+| Depth→Joint warm start + standard mutation | 0 | 0.7759 | 11.956 |
+| Depth→Joint warm start + standard mutation | 5 | 0.6738 | 11.948 |
+| Depth→Joint warm start + standard mutation | 10 | 0.6621 | 11.807 |
+| Depth→Joint warm start + standard mutation | 15 | 0.6619 | 11.799 |
+| Depth→Joint warm start + standard mutation | 20 | 0.6418 | 11.526 |
+| Depth→Joint warm start + standard mutation | 25 | 0.6388 | 11.521 |
+| Depth→Joint warm start + standard mutation | 30 | 0.6291 | 11.411 |
+| Depth→Joint warm start + standard mutation | 35 | 0.6226 | 11.362 |
+| Depth→Joint warm start + standard mutation | 40 | 0.6230 | 11.362 |
+| Depth→Joint warm start + standard mutation | 45 | 0.6146 | 11.271 |
+| Depth→Joint warm start + standard mutation | 50 | 0.6121 | 11.323 |
+| Standard initialization + interaction-aware mutation | 0 | 1.2744 | 23.349 |
+| Standard initialization + interaction-aware mutation | 5 | 0.8846 | 14.617 |
+| Standard initialization + interaction-aware mutation | 10 | 0.8029 | 13.258 |
+| Standard initialization + interaction-aware mutation | 15 | 0.7459 | 12.659 |
+| Standard initialization + interaction-aware mutation | 20 | 0.7036 | 12.133 |
+| Standard initialization + interaction-aware mutation | 25 | 0.6510 | 11.659 |
+| Standard initialization + interaction-aware mutation | 30 | 0.6351 | 11.510 |
+| Standard initialization + interaction-aware mutation | 35 | 0.6209 | 11.250 |
+| Standard initialization + interaction-aware mutation | 40 | 0.6209 | 11.250 |
+| Standard initialization + interaction-aware mutation | 45 | 0.6201 | 11.281 |
+| Standard initialization + interaction-aware mutation | 50 | 0.6090 | 11.086 |
+| Depth→Joint warm start + interaction-aware mutation | 0 | 0.7759 | 11.956 |
+| Depth→Joint warm start + interaction-aware mutation | 5 | 0.6366 | 11.469 |
+| Depth→Joint warm start + interaction-aware mutation | 10 | 0.6283 | 11.352 |
+| Depth→Joint warm start + interaction-aware mutation | 15 | 0.6245 | 11.380 |
+| Depth→Joint warm start + interaction-aware mutation | 20 | 0.6247 | 11.380 |
+| Depth→Joint warm start + interaction-aware mutation | 25 | 0.6239 | 11.339 |
+| Depth→Joint warm start + interaction-aware mutation | 30 | 0.6237 | 11.339 |
+| Depth→Joint warm start + interaction-aware mutation | 35 | 0.6144 | 11.216 |
+| Depth→Joint warm start + interaction-aware mutation | 40 | 0.6144 | 11.216 |
+| Depth→Joint warm start + interaction-aware mutation | 45 | 0.6136 | 11.224 |
+| Depth→Joint warm start + interaction-aware mutation | 50 | 0.6118 | 11.172 |
 
 ## Search Cost
 
@@ -98,12 +120,13 @@ The four generated convergence views show the same trajectories against generati
 
 Under standard mutation, the final paired warm-start delta is +0.081 ± 0.639 PPL with 1/3 seed wins.
 Under interaction-aware mutation, the final paired warm-start delta is +0.086 ± 0.172 PPL with 1/3 seed wins.
-Use the generation-20 versus generation-50 deltas and the cost-normalized curves together: generation alone does not account for the 31-candidate initialization difference, while total pipeline cost additionally includes the depth-only search.
+Use the delta after 20 completed generations versus the final generation-50 delta and the cost-normalized curves together: generation alone does not account for the 31-candidate initialization difference, while total pipeline cost additionally includes the depth-only search.
 
 ## Limitations
 
 - Three seeds support descriptive paired comparisons, not strong significance claims.
 - Runtime comes from restarted TU Wien DataLab sessions and is an approximate wall-clock measure.
+- Intermediate runtime timestamps are written after each generation while the logged parent fitness and periodic PPL describe the state entering that generation; runtime-normalized intermediate points can therefore carry an offset of up to one generation. The final runtime point uses the finalized run summary.
 - Evaluated-token exposure is a search-cost proxy; model execution cost also depends on caching and batch behavior.
 - The conclusion applies to Mistral-7B, WikiText2, 25% depth sparsity, and q_proj-only active 3-bit quantization.
 

@@ -103,7 +103,8 @@ PAIR_DEFINITIONS = (
         ),
     },
 )
-CHECKPOINT_GENERATIONS = (5, 10, 20, 30, 40, 50)
+CHECKPOINT_COMPLETED_GENERATIONS = (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50)
+EARLY_COMPARISON_COMPLETED_GENERATIONS = 20
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -653,17 +654,26 @@ def run_row_and_convergence(
     previous_runtime = -1.0
     for generation_row in generation_rows:
         generation = int(generation_row["generation"])
-        runtime_seconds = require_finite(
+        logged_runtime_seconds = require_finite(
             generation_row["runtime_seconds_cumulative"],
             f"{run_dir} generation {generation} runtime",
         )
-        if runtime_seconds < previous_runtime:
+        if logged_runtime_seconds < previous_runtime:
             raise ValueError(f"Non-monotonic cumulative runtime in {run_dir}")
-        previous_runtime = runtime_seconds
-        generation_cost = selection_cost(search, generation)
+        previous_runtime = logged_runtime_seconds
+        final_state = generation == int(search["generations"])
+        completed_generations = generation if final_state else generation - 1
+        generation_cost = selection_cost(search, completed_generations)
         ppl = optional_float(generation_row.get("wikitext2_ppl"))
-        if generation == 50:
+        fitness = require_finite(
+            generation_row["best_search_fitness"],
+            f"{run_dir} generation {generation} fitness",
+        )
+        runtime_seconds = logged_runtime_seconds
+        if final_state:
             ppl = row["wikitext2_ppl"]
+            fitness = row["best_search_fitness"]
+            runtime_seconds = stage2_runtime_seconds
         convergence.append(
             {
                 "condition": condition,
@@ -673,10 +683,13 @@ def run_row_and_convergence(
                 "seed": seed,
                 "run_id": run_dir.name,
                 "generation": generation,
-                "best_search_fitness": require_finite(
-                    generation_row["best_search_fitness"],
-                    f"{run_dir} generation {generation} fitness",
+                "completed_generations": completed_generations,
+                "search_state": (
+                    "final_parent_after_search"
+                    if final_state
+                    else "parent_entering_generation"
                 ),
+                "best_search_fitness": fitness,
                 "wikitext2_ppl": ppl,
                 "stage2_candidate_evaluations_cumulative": generation_cost[
                     "candidate_evaluations"
@@ -866,7 +879,7 @@ def write_csv(
     names = list(rows[0]) if fieldnames is None else list(fieldnames)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=names)
+        writer = csv.DictWriter(handle, fieldnames=names, lineterminator="\n")
         writer.writeheader()
         for row in rows:
             writer.writerow({name: row.get(name) for name in names})
@@ -893,12 +906,13 @@ def paired_summary(
 def checkpoint_means(
     convergence: Sequence[Mapping[str, Any]],
     condition: str,
-    generation: int,
+    completed_generations: int,
 ) -> tuple[float, float | None]:
     rows = [
         row
         for row in convergence
-        if row["condition"] == condition and row["generation"] == generation
+        if row["condition"] == condition
+        and row["completed_generations"] == completed_generations
     ]
     fitness = mean(row["best_search_fitness"] for row in rows)
     ppls = [row["wikitext2_ppl"] for row in rows if row["wikitext2_ppl"] is not None]
@@ -911,33 +925,42 @@ def trend_statement(
     standard_condition: str,
     mutation_label: str,
 ) -> str:
-    _, warm20 = checkpoint_means(convergence, warm_condition, 20)
-    _, standard20 = checkpoint_means(convergence, standard_condition, 20)
+    early_generation = EARLY_COMPARISON_COMPLETED_GENERATIONS
+    _, warm_early = checkpoint_means(
+        convergence,
+        warm_condition,
+        early_generation,
+    )
+    _, standard_early = checkpoint_means(
+        convergence,
+        standard_condition,
+        early_generation,
+    )
     _, warm50 = checkpoint_means(convergence, warm_condition, 50)
     _, standard50 = checkpoint_means(convergence, standard_condition, 50)
-    if None in (warm20, standard20, warm50, standard50):
+    if None in (warm_early, standard_early, warm50, standard50):
         return (
             f"The periodic PPL checkpoints are incomplete for {mutation_label}; "
             "inspect the convergence CSV."
         )
-    delta20 = float(warm20) - float(standard20)
+    delta20 = float(warm_early) - float(standard_early)
     delta50 = float(warm50) - float(standard50)
     if delta20 < 0 and delta50 < 0:
-        relation = (
-            "persists but narrows"
+        conclusion = (
+            "the warm-start advantage persists but narrows"
             if abs(delta50) < abs(delta20)
-            else "persists and grows"
+            else "the warm-start advantage persists and grows"
         )
     elif delta20 < 0 <= delta50:
-        relation = "is an early advantage that reverses by generation 50"
+        conclusion = "the early warm-start advantage reverses by generation 50"
     elif delta20 >= 0 > delta50:
-        relation = "emerges only later in the search"
+        conclusion = "a warm-start advantage emerges only later in the search"
     else:
-        relation = "is not observed at either checkpoint"
+        conclusion = "a warm-start advantage is not observed at either checkpoint"
     return (
         f"Under {mutation_label}, the warm-start delta is "
-        f"{delta20:+.3f} PPL at generation 20 and {delta50:+.3f} at "
-        f"generation 50; the advantage {relation}."
+        f"{delta20:+.3f} PPL after {early_generation} completed generations "
+        f"and {delta50:+.3f} after generation 50; {conclusion}."
     )
 
 
@@ -1069,22 +1092,36 @@ def build_markdown(
             "",
             (
                 "The four generated convergence views show the same trajectories "
-                "against generation, cumulative stage-two candidate evaluations, "
-                "cumulative stage-two fitness-token exposures, and cumulative "
-                "stage-two runtime."
+                "against completed generations, cumulative stage-two candidate "
+                "evaluations, cumulative stage-two fitness-token exposures, and "
+                "cumulative stage-two runtime."
+            ),
+            "",
+            (
+                "The source log evaluates the parent before each generation's "
+                "mutation but writes it on the row numbered for that generation. "
+                "Accordingly, logged row 1 is the initialized parent (zero completed "
+                "generations), logged rows 6, 11, ..., 46 are the parents after "
+                "5, 10, ..., 45 completed generations, and the final point uses the "
+                "post-generation-50 metrics from `run_summary.json`."
             ),
             "",
             "### Mean Checkpoints",
             "",
-            "| Condition | Generation | Best KL fitness | WikiText2 PPL |",
+            "| Condition | Completed generations | Best KL fitness | WikiText2 PPL |",
             "| --- | ---: | ---: | ---: |",
         ]
     )
     for condition in CONDITION_ORDER:
-        for generation in CHECKPOINT_GENERATIONS:
-            fitness, ppl = checkpoint_means(convergence, condition, generation)
+        for completed_generations in CHECKPOINT_COMPLETED_GENERATIONS:
+            fitness, ppl = checkpoint_means(
+                convergence,
+                condition,
+                completed_generations,
+            )
             lines.append(
-                f"| {CONDITION_METADATA[condition]['label']} | {generation} | "
+                f"| {CONDITION_METADATA[condition]['label']} | "
+                f"{completed_generations} | "
                 f"{fmt(fitness, 4)} | {fmt(ppl) if ppl is not None else ''} |"
             )
 
@@ -1151,16 +1188,18 @@ def build_markdown(
                 f"{warm_interaction_delta[2]}/3 seed wins."
             ),
             (
-                "Use the generation-20 versus generation-50 deltas and the "
-                "cost-normalized curves together: generation alone does not "
-                "account for the 31-candidate initialization difference, while "
-                "total pipeline cost additionally includes the depth-only search."
+                "Use the delta after 20 completed generations versus the final "
+                "generation-50 delta and the cost-normalized curves together: "
+                "generation alone does not account for the 31-candidate "
+                "initialization difference, while total pipeline cost additionally "
+                "includes the depth-only search."
             ),
             "",
             "## Limitations",
             "",
             "- Three seeds support descriptive paired comparisons, not strong significance claims.",
             "- Runtime comes from restarted TU Wien DataLab sessions and is an approximate wall-clock measure.",
+            "- Intermediate runtime timestamps are written after each generation while the logged parent fitness and periodic PPL describe the state entering that generation; runtime-normalized intermediate points can therefore carry an offset of up to one generation. The final runtime point uses the finalized run summary.",
             "- Evaluated-token exposure is a search-cost proxy; model execution cost also depends on caching and batch behavior.",
             "- The conclusion applies to Mistral-7B, WikiText2, 25% depth sparsity, and q_proj-only active 3-bit quantization.",
             "",
@@ -1320,8 +1359,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.no_plots:
         plot_specs = (
             (
-                "generation",
-                "Generation",
+                "completed_generations",
+                "Completed stage-two generations",
                 "generation",
                 "generation",
             ),

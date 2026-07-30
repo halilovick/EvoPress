@@ -1,15 +1,20 @@
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from scripts.summarize_depth_warmstart_g50 import (
     CONDITION_ORDER,
     aggregate_rows,
+    build_rows,
     normalize_depth_candidate,
     paired_delta_rows,
+    run_row_and_convergence,
     selection_cost,
     stable_json_hash,
+    trend_statement,
     validate_final_candidate,
     validate_warm_provenance,
+    write_csv,
 )
 
 
@@ -84,6 +89,16 @@ class SummarizeDepthWarmstartG50Test(unittest.TestCase):
         self.assertEqual(cost["candidate_evaluations"], 1351)
         self.assertEqual(cost["evaluated_tokens"], 2458112)
 
+    def test_csv_writer_uses_repository_friendly_line_endings(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "rows.csv"
+            write_csv(path, [{"condition": "test", "value": 1}])
+
+            payload = path.read_bytes()
+
+        self.assertNotIn(b"\r\n", payload)
+        self.assertEqual(payload, b"condition,value\ntest,1\n")
+
     def test_aggregate_and_paired_rows_answer_the_four_comparisons(self) -> None:
         rows = synthetic_rows()
 
@@ -138,6 +153,78 @@ class SummarizeDepthWarmstartG50Test(unittest.TestCase):
             / ("thesis_compute_matched_joint_mistral_s0.25_qproj3.0_g50_o16_seed0")
             / "final_candidate.json"
         )
+
+    def test_convergence_uses_completed_generations_and_exact_cost_state(self) -> None:
+        run_dir = RUNS_ROOT / (
+            "thesis_compute_matched_joint_mistral_s0.25_qproj3.0_g50_o16_seed0"
+        )
+
+        run, convergence = run_row_and_convergence(
+            "standard_standard",
+            0,
+            run_dir,
+            RUNS_ROOT,
+        )
+
+        self.assertEqual(
+            [row["completed_generations"] for row in convergence],
+            [*range(49), 50],
+        )
+        self.assertEqual(
+            [
+                row["completed_generations"]
+                for row in convergence
+                if row["wikitext2_ppl"] is not None
+            ],
+            [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50],
+        )
+        self.assertEqual(
+            convergence[0]["stage2_candidate_evaluations_cumulative"],
+            32,
+        )
+        self.assertEqual(
+            convergence[0]["stage2_evaluated_tokens_cumulative"],
+            16384,
+        )
+        self.assertEqual(
+            convergence[-1]["stage2_candidate_evaluations_cumulative"],
+            1382,
+        )
+        self.assertEqual(
+            convergence[-1]["stage2_evaluated_tokens_cumulative"],
+            2473984,
+        )
+        self.assertEqual(
+            convergence[-1]["best_search_fitness"],
+            run["best_search_fitness"],
+        )
+        self.assertEqual(
+            convergence[-1]["wikitext2_ppl"],
+            run["wikitext2_ppl"],
+        )
+
+    def test_real_trend_statements_use_available_periodic_evaluations(self) -> None:
+        _, convergence = build_rows(RUNS_ROOT)
+
+        standard = trend_statement(
+            convergence,
+            "depthwarm_standard",
+            "standard_standard",
+            "standard mutation",
+        )
+        interaction = trend_statement(
+            convergence,
+            "depthwarm_interaction",
+            "standard_interaction",
+            "interaction-aware mutation",
+        )
+
+        self.assertNotIn("incomplete", standard)
+        self.assertNotIn("incomplete", interaction)
+        self.assertIn("-1.081 PPL after 20 completed generations", standard)
+        self.assertIn("-0.753 PPL after 20 completed generations", interaction)
+        self.assertIn("reverses by generation 50", standard)
+        self.assertIn("reverses by generation 50", interaction)
 
 
 if __name__ == "__main__":

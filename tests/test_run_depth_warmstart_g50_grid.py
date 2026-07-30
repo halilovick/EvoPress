@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,14 @@ LAUNCHER = REPO_ROOT / "scripts" / "run_depth_warmstart_g50_grid.sh"
 
 
 class RunDepthWarmstartG50GridTest(unittest.TestCase):
+    def copy_stage_one_fixture(self, runs_root: Path, seed: int = 0) -> Path:
+        run_id = f"thesis_medium_depth_mistral_s0.25_g20_o16_seed{seed}"
+        source = REPO_ROOT / "results" / "runs" / run_id
+        destination = runs_root / run_id
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, destination)
+        return destination
+
     def run_launcher(
         self,
         env: dict[str, str],
@@ -60,10 +69,12 @@ class RunDepthWarmstartG50GridTest(unittest.TestCase):
     def test_warm_conditions_reuse_seed_matched_depth_runs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
+            runs_root = root / "runs"
+            stage1 = self.copy_stage_one_fixture(runs_root)
             result = self.run_launcher(
                 {
                     "OUTPUTS_ROOT": str(root / "outputs"),
-                    "RESULTS_RUNS_ROOT": str(REPO_ROOT / "results" / "runs"),
+                    "RESULTS_RUNS_ROOT": str(runs_root),
                     "RESULTS_DIR": str(root / "results"),
                     "EXPERIMENT_LOG": str(root / "experiment_log.csv"),
                     "CONDITIONS": "depthwarm_standard depthwarm_interaction",
@@ -72,12 +83,6 @@ class RunDepthWarmstartG50GridTest(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        stage1 = (
-            REPO_ROOT
-            / "results"
-            / "runs"
-            / "thesis_medium_depth_mistral_s0.25_g20_o16_seed0"
-        )
         self.assertIn("--sequential_mode depth_to_joint_warm", result.stdout)
         self.assertIn(f"--stage1_run_dir {stage1}", result.stdout)
         self.assertIn("--sequential_quant_initialization_policy strict", result.stdout)
@@ -107,6 +112,8 @@ class RunDepthWarmstartG50GridTest(unittest.TestCase):
     def test_incomplete_warm_output_gets_retry_identifier(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
+            runs_root = root / "runs"
+            self.copy_stage_one_fixture(runs_root)
             incomplete = (
                 root
                 / "outputs"
@@ -120,7 +127,7 @@ class RunDepthWarmstartG50GridTest(unittest.TestCase):
             result = self.run_launcher(
                 {
                     "OUTPUTS_ROOT": str(root / "outputs"),
-                    "RESULTS_RUNS_ROOT": str(REPO_ROOT / "results" / "runs"),
+                    "RESULTS_RUNS_ROOT": str(runs_root),
                     "RESULTS_DIR": str(root / "results"),
                     "CONDITIONS": "depthwarm_standard",
                     "SEEDS": "0",

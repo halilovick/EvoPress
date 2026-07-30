@@ -227,13 +227,19 @@ cost deltas for:
 
 The four plots show both KL search fitness and periodic WikiText2 PPL against:
 
-- generation;
+- completed stage-two generations;
 - cumulative stage-two candidate evaluations;
 - cumulative stage-two evaluated tokens;
 - cumulative stage-two runtime.
 
 The long-form convergence CSV also contains total cumulative candidate,
-token, and runtime columns including the depth stage-one run.
+token, and runtime columns including the depth stage-one run. Because the
+source log evaluates a parent before mutating it, logged row 1 represents zero
+completed generations, rows 6, 11, ..., 46 represent 5, 10, ..., 45 completed
+generations, and the final point comes from the finalized post-generation-50
+summary. Intermediate runtime timestamps are recorded after each generation,
+so runtime-normalized intermediate states can carry an offset of up to one
+generation; the final runtime point is exact.
 
 ## 9. TU Wien DataLab Commands
 
@@ -266,9 +272,10 @@ for SEED in 0 1 2; do
   python scripts/validate_run_outputs.py "$STAGE1"
 done
 
-python -m unittest \
-  tests.test_run_depth_warmstart_g50_grid \
-  tests.test_summarize_depth_warmstart_g50
+python -m unittest discover \
+  -s tests \
+  -p 'test_*depth_warmstart_g50*.py' \
+  -v
 ```
 
 If `/opt/conda/etc/profile.d/conda.sh` is absent, the current Jupyter shell may
@@ -450,9 +457,10 @@ No Mistral experiment should be run locally. The implementation-level checks
 are:
 
 ```bash
-python -m unittest \
-  tests.test_run_depth_warmstart_g50_grid \
-  tests.test_summarize_depth_warmstart_g50
+python -m unittest discover \
+  -s tests \
+  -p 'test_*depth_warmstart_g50*.py' \
+  -v
 
 bash -n scripts/run_depth_warmstart_g50_grid.sh
 python -m py_compile scripts/summarize_depth_warmstart_g50.py
@@ -467,8 +475,8 @@ if any matrix cell or scientific invariant is missing.
 
 - The primary paired comparisons are warm versus standard initialization
   within the same mutation operator.
-- Generation-20 and generation-50 paired deltas distinguish an early-only
-  effect from a persistent effect.
+- Paired deltas after 20 completed generations and after generation 50
+  distinguish an early-only effect from a persistent effect.
 - Candidate- and token-normalized plots account for the 31-candidate
   stage-two initialization difference.
 - Total pipeline cost includes the depth stage-one search only for warm runs.
