@@ -61,10 +61,16 @@ METHOD_METADATA: dict[str, dict[str, str]] = {
         "comparison_role": "target-matched sequential composition baseline",
     },
     "joint_g20": {
-        "label": "Standard joint G20",
-        "short_label": "Joint G20",
+        "label": "Standard-init + standard mutation (G20)",
+        "short_label": "Standard init +\nstandard G20",
         "category": "baseline",
-        "comparison_role": "same stage-two generation/offspring schedule",
+        "comparison_role": "standard-initialization standard-mutation G20 control",
+    },
+    "interaction_aware_g20": {
+        "label": "Standard-init + interaction-aware (G20)",
+        "short_label": "Standard init +\ninteraction G20",
+        "category": "baseline",
+        "comparison_role": "matched standard-initialization interaction-aware G20 control",
     },
     "seq_depth_to_quant_frozen": {
         "label": "Depth → Quantization, frozen",
@@ -128,7 +134,9 @@ PAIR_BASELINES = (
     "interaction_aware_g50",
 )
 MATCHED_PAIRINGS = (
+    ("quantwarm_interaction_aware_g20", "interaction_aware_g20"),
     ("quantwarm_interaction_aware_g20", "seq_quant_to_joint_warm"),
+    ("interaction_aware_g20", "joint_g20"),
     ("depthwarm_interaction_aware_g50", "interaction_aware_g50"),
 )
 
@@ -254,12 +262,48 @@ def read_generation_statistics(path: Path) -> dict[str, Any]:
     }
 
 
+def search_effort(search: Mapping[str, Any]) -> dict[str, int]:
+    initial_candidates = int(
+        search.get("initial_candidates_evaluated", search["initial_candidates"])
+    )
+    initial_tokens = int(search["initial_tokens"])
+    generations = int(search["generations"])
+    offspring = int(search["offspring"])
+    survivors = [int(value) for value in search["selection_survivors"]]
+    selection_tokens = [int(value) for value in search["selection_tokens"]]
+    if len(survivors) != len(selection_tokens):
+        raise ValueError("Selection survivor/token schedules have different lengths")
+
+    per_generation_evaluations = 0
+    per_generation_tokens = 0
+    candidates_at_stage = offspring
+    for stage, (survivor_count, token_count) in enumerate(
+        zip(survivors, selection_tokens)
+    ):
+        evaluated = candidates_at_stage + (stage == len(survivors) - 1)
+        per_generation_evaluations += evaluated
+        per_generation_tokens += evaluated * token_count
+        candidates_at_stage = survivor_count
+
+    return {
+        "candidate_evaluations": (
+            initial_candidates + generations * per_generation_evaluations
+        ),
+        "evaluated_tokens": (
+            initial_candidates * initial_tokens
+            + generations * per_generation_tokens
+        ),
+    }
+
+
 def structured_run_row(
     *,
     method: str,
     seed: int,
     run_dir: Path,
     stage1_runtime_seconds: float = 0.0,
+    stage1_candidate_evaluations: int = 0,
+    stage1_evaluated_tokens: int = 0,
 ) -> dict[str, Any]:
     summary = load_json(run_dir / "run_summary.json")
     metrics = summary["final_metrics"]
@@ -275,6 +319,7 @@ def structured_run_row(
             f"Seed mismatch for {run_dir}: expected {seed}, got {search['seed']}"
         )
     runtime_seconds = require_finite(metrics["runtime_seconds"], f"{run_dir} runtime")
+    stage2_effort = search_effort(search)
     row: dict[str, Any] = {
         "method": method,
         "method_label": METHOD_METADATA[method]["label"],
@@ -293,6 +338,16 @@ def structured_run_row(
         "stage2_runtime_minutes": runtime_seconds / 60,
         "total_pipeline_runtime_minutes": (stage1_runtime_seconds + runtime_seconds)
         / 60,
+        "stage1_candidate_evaluations": stage1_candidate_evaluations,
+        "stage2_candidate_evaluations": stage2_effort["candidate_evaluations"],
+        "total_pipeline_candidate_evaluations": (
+            stage1_candidate_evaluations + stage2_effort["candidate_evaluations"]
+        ),
+        "stage1_evaluated_tokens": stage1_evaluated_tokens,
+        "stage2_evaluated_tokens": stage2_effort["evaluated_tokens"],
+        "total_pipeline_evaluated_tokens": (
+            stage1_evaluated_tokens + stage2_effort["evaluated_tokens"]
+        ),
         "estimated_compression_ratio": require_finite(
             metrics["estimated_compression_ratio"],
             f"{run_dir} compression ratio",
@@ -406,6 +461,69 @@ def structured_run_row(
                 raise ValueError(f"Strict warm start was repaired for {run_dir}")
             if summary.get("initial_repair_changed_gene_count") != 0:
                 raise ValueError(f"Strict warm start changed genes for {run_dir}")
+    if method == "interaction_aware_g20":
+        expected_search = {
+            "sequential_mode": "none",
+            "generations": 20,
+            "offspring": 16,
+            "initial_candidates": 32,
+            "initial_candidates_evaluated": 32,
+            "calibration_tokens": 8192,
+            "sequence_length": 1024,
+            "selection_tokens": [512, 2048, 8192],
+            "selection_survivors": [8, 2, 1],
+        }
+        for key, expected in expected_search.items():
+            if search.get(key) != expected:
+                raise ValueError(
+                    f"Unexpected {key} for matched G20 control {run_dir}"
+                )
+
+        compression = summary["compression_config"]
+        expected_compression = {
+            "active_quant_budget": True,
+            "group_rule": "size",
+            "joint_mutation_mode": "interaction_aware",
+            "joint_aware_mutation": False,
+            "target_depth_sparsity": 0.25,
+            "target_average_bitwidth": 3.0,
+        }
+        for key, expected in expected_compression.items():
+            if compression.get(key) != expected:
+                raise ValueError(
+                    f"Unexpected {key} for matched G20 control {run_dir}"
+                )
+
+        depth = summary["depth_statistics"]
+        if (
+            depth["dropped_attention_count"] != 8
+            or depth["dropped_mlp_count"] != 8
+        ):
+            raise ValueError(f"Invalid depth counts for matched G20 control {run_dir}")
+
+        histogram = summary["quantization_statistics"]["bitwidth_histogram"]
+        active_count = sum(int(count) for count in histogram.values())
+        active_sum = sum(
+            int(bits) * int(count) for bits, count in histogram.items()
+        )
+        if active_count != 24 or active_sum != 72:
+            raise ValueError(f"Invalid active quantization budget for {run_dir}")
+        if row["generated_interaction_aware"] != 320:
+            raise ValueError(f"Unexpected mutation count for {run_dir}")
+
+        command = (run_dir / "command.sh").read_text(encoding="utf-8")
+        for forbidden in (
+            "--sequential_mode",
+            "--stage1_run_dir",
+            "--stage1_candidate",
+            "--sequential_quant_initialization_policy",
+            "--joint_aware_mutation",
+        ):
+            if forbidden in command:
+                raise ValueError(f"Forbidden argument {forbidden} in {run_dir}")
+
+        row["active_budget_valid"] = True
+        row["depth_counts_valid"] = True
     return row
 
 
@@ -467,6 +585,12 @@ def composition_row(
         "final_calibration_kl": None,
         "stage1_runtime_minutes": source_seconds / 60,
         "stage2_runtime_minutes": runtime_seconds / 60,
+        "stage1_candidate_evaluations": None,
+        "stage2_candidate_evaluations": None,
+        "total_pipeline_candidate_evaluations": None,
+        "stage1_evaluated_tokens": None,
+        "stage2_evaluated_tokens": None,
+        "total_pipeline_evaluated_tokens": None,
         "total_pipeline_runtime_minutes": (
             require_finite(
                 medium_row["total_pipeline_runtime_seconds"],
@@ -551,16 +675,22 @@ def build_run_rows(runs_root: Path, results_dir: Path) -> list[dict[str, Any]]:
                 f"thesis_sequential_{mode}_"
                 f"mistral_s0.25_qproj3.0_g20_o16_seed{seed}"
             )
+            stage1_summary = stage1_summaries[(direction, seed)]
             stage1_runtime = require_finite(
-                stage1_summaries[(direction, seed)]["final_metrics"]["runtime_seconds"],
+                stage1_summary["final_metrics"]["runtime_seconds"],
                 f"{direction} stage-one seed {seed} runtime",
             )
+            stage1_effort = search_effort(stage1_summary["search_config"])
             rows.append(
                 structured_run_row(
                     method=method,
                     seed=seed,
                     run_dir=runs_root / run_id,
                     stage1_runtime_seconds=stage1_runtime,
+                    stage1_candidate_evaluations=stage1_effort[
+                        "candidate_evaluations"
+                    ],
+                    stage1_evaluated_tokens=stage1_effort["evaluated_tokens"],
                 )
             )
 
@@ -568,21 +698,31 @@ def build_run_rows(runs_root: Path, results_dir: Path) -> list[dict[str, Any]]:
         direction = str(spec["direction"])
         for seed in SEEDS:
             run_id = str(spec["run_pattern"]).format(seed=seed)
+            stage1_summary = stage1_summaries[(direction, seed)]
             stage1_runtime = require_finite(
-                stage1_summaries[(direction, seed)]["final_metrics"]["runtime_seconds"],
+                stage1_summary["final_metrics"]["runtime_seconds"],
                 f"{direction} stage-one seed {seed} runtime",
             )
+            stage1_effort = search_effort(stage1_summary["search_config"])
             rows.append(
                 structured_run_row(
                     method=method,
                     seed=seed,
                     run_dir=runs_root / run_id,
                     stage1_runtime_seconds=stage1_runtime,
+                    stage1_candidate_evaluations=stage1_effort[
+                        "candidate_evaluations"
+                    ],
+                    stage1_evaluated_tokens=stage1_effort["evaluated_tokens"],
                 )
             )
 
     structured_baselines = {
         "joint_g20": ("thesis_medium_joint_mistral_s0.25_qproj3.0_g20_o16_seed{seed}"),
+        "interaction_aware_g20": (
+            "thesis_interactionaware_joint_"
+            "mistral_s0.25_qproj3.0_g20_o16_seed{seed}"
+        ),
         "joint_g50": (
             "thesis_compute_matched_joint_" "mistral_s0.25_qproj3.0_g50_o16_seed{seed}"
         ),
@@ -670,6 +810,25 @@ def aggregate_rows(run_rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
                 ),
                 "total_pipeline_runtime_minutes_sample_std": sample_std(
                     row["total_pipeline_runtime_minutes"] for row in method_rows
+                ),
+                "stage1_candidate_evaluations_mean": mean(
+                    row["stage1_candidate_evaluations"] for row in method_rows
+                ),
+                "stage2_candidate_evaluations_mean": mean(
+                    row["stage2_candidate_evaluations"] for row in method_rows
+                ),
+                "total_pipeline_candidate_evaluations_mean": mean(
+                    row["total_pipeline_candidate_evaluations"]
+                    for row in method_rows
+                ),
+                "stage1_evaluated_tokens_mean": mean(
+                    row["stage1_evaluated_tokens"] for row in method_rows
+                ),
+                "stage2_evaluated_tokens_mean": mean(
+                    row["stage2_evaluated_tokens"] for row in method_rows
+                ),
+                "total_pipeline_evaluated_tokens_mean": mean(
+                    row["total_pipeline_evaluated_tokens"] for row in method_rows
                 ),
                 "estimated_compression_ratio_mean": mean(
                     row["estimated_compression_ratio"] for row in method_rows
@@ -805,8 +964,16 @@ def build_markdown(
     ]
     quant_standard = aggregate_by_method["seq_quant_to_joint_warm"]
     quant_interaction = aggregate_by_method["quantwarm_interaction_aware_g20"]
+    interaction_g20 = aggregate_by_method["interaction_aware_g20"]
     depth_standard_independent_delta, _, depth_standard_independent_wins = (
         paired_summary(paired, "seq_depth_to_joint_warm", "independent")
+    )
+    quant_warm_vs_control_delta, quant_warm_vs_control_std, quant_warm_vs_control_wins = (
+        paired_summary(
+            paired,
+            "quantwarm_interaction_aware_g20",
+            "interaction_aware_g20",
+        )
     )
     quant_interaction_delta, quant_interaction_delta_std, quant_interaction_wins = (
         paired_summary(
@@ -814,6 +981,9 @@ def build_markdown(
             "quantwarm_interaction_aware_g20",
             "seq_quant_to_joint_warm",
         )
+    )
+    control_mutation_delta, control_mutation_std, control_mutation_wins = (
+        paired_summary(paired, "interaction_aware_g20", "joint_g20")
     )
     depthwarm_interaction_delta, depthwarm_interaction_delta_std, depthwarm_interaction_wins = (
         paired_summary(
@@ -841,9 +1011,10 @@ def build_markdown(
         "",
         (
             "This report compares five 20-generation sequential conditions, "
-            "including both mutation operators for quantization-first warm "
-            "starts, plus the completed 50-generation depth-warm interaction-aware "
-            "reference. Lower WikiText2 perplexity (PPL) is better."
+            "including both mutation operators for quantization-first warm starts, "
+            "with a matched standard-initialization interaction-aware G20 control. "
+            "The completed depth-warm interaction-aware G50 study remains a "
+            "separately labeled reference. Lower WikiText2 PPL is better."
         ),
         "",
         "## Scope and Validation",
@@ -857,7 +1028,8 @@ def build_markdown(
         ),
         "",
         (
-            "The generator verified 15 G20 sequential summaries and the three "
+            "The generator verified 15 G20 sequential summaries, three matched "
+            "standard-initialization interaction-aware G20 controls, and the three "
             "depth-warm interaction-aware G50 summaries, including exact depth "
             "counts, active quantization budgets, stage-one provenance hashes, "
             "and frozen-component invariants. Both quantization-first warm-start "
@@ -895,8 +1067,10 @@ def build_markdown(
             f"joint G20. Standard-initialization interaction-aware G50 reaches "
             f"{interaction_g50['wikitext2_ppl_mean']:.3f} mean PPL; its matched "
             f"depth-warm counterpart reaches "
-            f"{depthwarm_interaction_g50['wikitext2_ppl_mean']:.3f}. Both are "
-            "explicitly separated from the G20 conditions."
+            f"{depthwarm_interaction_g50['wikitext2_ppl_mean']:.3f}. At G20, "
+            f"quant-warm interaction-aware differs from its matched standard-init "
+            f"control by {quant_warm_vs_control_delta:+.3f} PPL on average. G50 "
+            "results remain explicitly separated from G20."
         ),
         "",
         "## Aggregate Comparison",
@@ -937,11 +1111,12 @@ def build_markdown(
                 "| Seed | Depth→Quant frozen | Depth→Joint standard G20 | "
                 "Depth→Joint interaction G50 | Quant→Depth frozen | "
                 "Quant→Joint standard G20 | Quant→Joint interaction G20 | "
-                "Independent | Joint G20 | Joint G50 | Interaction-aware G50 |"
+                "Independent | Standard-init standard G20 | "
+                "Standard-init interaction G20 | Joint G50 | Interaction-aware G50 |"
             ),
             (
                 "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
-                "---: | ---: | ---: | ---: |"
+                "---: | ---: | ---: | ---: | ---: |"
             ),
         ]
     )
@@ -954,6 +1129,7 @@ def build_markdown(
         "quantwarm_interaction_aware_g20",
         "independent",
         "joint_g20",
+        "interaction_aware_g20",
         "joint_g50",
         "interaction_aware_g50",
     )
@@ -999,11 +1175,26 @@ def build_markdown(
             ),
             "| --- | ---: | ---: | --- |",
             (
+                "| Quant warm interaction-aware G20 − standard-init "
+                "interaction-aware G20 | "
+                f"{fmt(quant_warm_vs_control_delta, signed=True)} ± "
+                f"{fmt(quant_warm_vs_control_std)} | "
+                f"{quant_warm_vs_control_wins}/3 | Same interaction-aware operator "
+                "and G20 budget; initialization changes. |"
+            ),
+            (
                 "| Quant warm interaction-aware G20 − quant warm standard G20 | "
                 f"{fmt(quant_interaction_delta, signed=True)} ± "
                 f"{fmt(quant_interaction_delta_std)} | "
                 f"{quant_interaction_wins}/3 | Same initialization direction and "
                 "stage-two budget; mutation operator changes. |"
+            ),
+            (
+                "| Standard-init interaction-aware G20 − standard-init standard G20 | "
+                f"{fmt(control_mutation_delta, signed=True)} ± "
+                f"{fmt(control_mutation_std)} | "
+                f"{control_mutation_wins}/3 | Same standard initialization and G20 "
+                "budget; mutation operator changes. |"
             ),
             (
                 "| Depth-warm interaction-aware G50 − standard-initialization "
@@ -1031,6 +1222,45 @@ def build_markdown(
             f"{row['offspring_no_ops_total']} | "
             f"{row['offspring_duplicates_total']} | "
             f"{row['offspring_infeasible_total']} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Matched G20 Search-Cost Accounting",
+            "",
+            (
+                "Candidate evaluations count nominal search-fitness evaluations "
+                "across initialization and progressive selection, including the "
+                "final-stage parent evaluation. Token exposure multiplies each "
+                "evaluation by its configured calibration-token stage; final PPL "
+                "evaluation is excluded."
+            ),
+            "",
+            (
+                "| Method | Stage 1 min | Stage 2 min | End-to-end min | "
+                "Stage 2 evals | Stage 2 tokens | End-to-end evals | "
+                "End-to-end tokens |"
+            ),
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for method in (
+        "joint_g20",
+        "interaction_aware_g20",
+        "seq_quant_to_joint_warm",
+        "quantwarm_interaction_aware_g20",
+    ):
+        cost = aggregate_by_method[method]
+        lines.append(
+            f"| {cost['method_label']} | "
+            f"{fmt(cost['stage1_runtime_minutes_mean'], 2)} | "
+            f"{fmt(cost['stage2_runtime_minutes_mean'], 2)} | "
+            f"{fmt(cost['total_pipeline_runtime_minutes_mean'], 2)} | "
+            f"{cost['stage2_candidate_evaluations_mean']:.0f} | "
+            f"{cost['stage2_evaluated_tokens_mean']:.0f} | "
+            f"{cost['total_pipeline_candidate_evaluations_mean']:.0f} | "
+            f"{cost['total_pipeline_evaluated_tokens_mean']:.0f} |"
         )
 
     legal_counts = [
@@ -1063,6 +1293,18 @@ def build_markdown(
                 f"{max(legal_counts)} legal contribution-compatible swaps, but "
                 "the exact-budget frozen neighborhood still constrains which "
                 "structural exchanges are reachable."
+            ),
+            (
+                f"- With interaction-aware mutation and G20/O16 fixed, the "
+                f"quantization warm start changes mean PPL by "
+                f"{quant_warm_vs_control_delta:+.3f} relative to standard joint "
+                f"initialization and wins {quant_warm_vs_control_wins}/3 seeds."
+            ),
+            (
+                f"- With standard initialization and G20/O16 fixed, switching "
+                f"from standard to interaction-aware mutation changes mean PPL by "
+                f"{control_mutation_delta:+.3f} and wins "
+                f"{control_mutation_wins}/3 seeds."
             ),
             (
                 f"- Quantization → Joint warm + interaction-aware G20 reaches "
@@ -1133,6 +1375,7 @@ def build_markdown(
             "- Sequential initialization is direction-dependent.",
             "- A strong depth solution is a useful warm start for joint refinement.",
             "- Freezing quantization restricts depth exploration and produces high seed variance.",
+            "- The matched G20 control isolates quantization warm-start initialization under interaction-aware mutation.",
             "- Interaction-aware mutation improves the quantization-first warm G20 result relative to its standard-mutation counterpart.",
             "- Depth → Joint warm + standard remains the best G20 sequential condition; the G50 interaction-aware comparisons are reported separately.",
             "- Report stage-two and end-to-end search cost separately.",
@@ -1178,7 +1421,7 @@ def create_plot(
     fig, axes = plt.subplots(
         1,
         2,
-        figsize=(16, 6.5),
+        figsize=(17, 6.5),
         gridspec_kw={"width_ratios": [1, 1.25]},
     )
 
@@ -1225,7 +1468,7 @@ def create_plot(
     ax = axes[1]
     comparison_methods = (
         "joint_g20",
-        "seq_depth_to_joint_warm",
+        "interaction_aware_g20",
         "seq_quant_to_joint_warm",
         "quantwarm_interaction_aware_g20",
         "interaction_aware_g50",
@@ -1233,7 +1476,7 @@ def create_plot(
     )
     comparison_colors = (
         "#54789c",
-        sequential_colors["seq_depth_to_joint_warm"],
+        "#6d5a99",
         sequential_colors["seq_quant_to_joint_warm"],
         sequential_colors["quantwarm_interaction_aware_g20"],
         "#76568c",
@@ -1342,6 +1585,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "stage1_runtime_minutes",
         "stage2_runtime_minutes",
         "total_pipeline_runtime_minutes",
+        "stage1_candidate_evaluations",
+        "stage2_candidate_evaluations",
+        "total_pipeline_candidate_evaluations",
+        "stage1_evaluated_tokens",
+        "stage2_evaluated_tokens",
+        "total_pipeline_evaluated_tokens",
         "estimated_compression_ratio",
         "estimated_weight_memory_mb",
         "average_bitwidth_active",
