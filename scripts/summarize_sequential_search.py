@@ -24,6 +24,29 @@ SEQUENTIAL_MODES = (
 SEEDS = (0, 1, 2)
 MODEL_NAME = "mistralai/Mistral-7B-v0.3"
 
+MUTATION_VARIANT_RUN_SPECS: dict[str, dict[str, Any]] = {
+    "depthwarm_interaction_aware_g50": {
+        "mode": "depth_to_joint_warm",
+        "direction": "depth",
+        "generations": 50,
+        "mutation_mode": "interaction_aware",
+        "run_pattern": (
+            "thesis_depthwarm_interactionaware_joint_"
+            "mistral_s0.25_qproj3.0_g50_o16_seed{seed}"
+        ),
+    },
+    "quantwarm_interaction_aware_g20": {
+        "mode": "quant_to_joint_warm",
+        "direction": "quant",
+        "generations": 20,
+        "mutation_mode": "interaction_aware",
+        "run_pattern": (
+            "thesis_sequential_quant_to_joint_warm_interactionaware_"
+            "mistral_s0.25_qproj3.0_g20_o16_seed{seed}"
+        ),
+    },
+}
+
 METHOD_METADATA: dict[str, dict[str, str]] = {
     "depth_uniform": {
         "label": "Depth + uniform 3-bit q_proj",
@@ -50,10 +73,16 @@ METHOD_METADATA: dict[str, dict[str, str]] = {
         "comparison_role": "new sequential variant",
     },
     "seq_depth_to_joint_warm": {
-        "label": "Depth → Joint, warm-started",
-        "short_label": "Depth → Joint\nwarm",
+        "label": "Depth → Joint warm + standard (G20)",
+        "short_label": "Depth warm +\nstandard G20",
         "category": "sequential",
-        "comparison_role": "new sequential variant",
+        "comparison_role": "depth warm start with standard mutation",
+    },
+    "depthwarm_interaction_aware_g50": {
+        "label": "Depth → Joint warm + interaction-aware (G50)",
+        "short_label": "Depth warm +\ninteraction G50",
+        "category": "reference",
+        "comparison_role": "depth warm start with interaction-aware mutation at G50",
     },
     "seq_quant_to_depth_frozen": {
         "label": "Quantization → Depth, frozen",
@@ -62,10 +91,16 @@ METHOD_METADATA: dict[str, dict[str, str]] = {
         "comparison_role": "new sequential variant",
     },
     "seq_quant_to_joint_warm": {
-        "label": "Quantization → Joint, warm-started",
-        "short_label": "Quant → Joint\nwarm",
+        "label": "Quantization → Joint warm + standard (G20)",
+        "short_label": "Quant warm +\nstandard G20",
         "category": "sequential",
-        "comparison_role": "new sequential variant",
+        "comparison_role": "quantization warm start with standard mutation",
+    },
+    "quantwarm_interaction_aware_g20": {
+        "label": "Quantization → Joint warm + interaction-aware (G20)",
+        "short_label": "Quant warm +\ninteraction G20",
+        "category": "sequential",
+        "comparison_role": "quantization warm start with interaction-aware mutation",
     },
     "joint_g50": {
         "label": "Standard joint G50",
@@ -84,7 +119,7 @@ METHOD_METADATA: dict[str, dict[str, str]] = {
 METHOD_ORDER = tuple(METHOD_METADATA)
 SEQUENTIAL_METHODS = tuple(
     method for method in METHOD_ORDER if method.startswith("seq_")
-)
+) + ("quantwarm_interaction_aware_g20",)
 PAIR_BASELINES = (
     "depth_uniform",
     "independent",
@@ -92,13 +127,17 @@ PAIR_BASELINES = (
     "joint_g50",
     "interaction_aware_g50",
 )
+MATCHED_PAIRINGS = (
+    ("quantwarm_interaction_aware_g20", "seq_quant_to_joint_warm"),
+    ("depthwarm_interaction_aware_g50", "interaction_aware_g50"),
+)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Summarize the 4-mode x 3-seed Mistral sequential-search matrix "
-            "and its existing baselines."
+            "Summarize the Mistral sequential-search matrix, including "
+            "standard and interaction-aware warm-start conditions."
         )
     )
     parser.add_argument("--runs-root", type=Path, default=Path("results/runs"))
@@ -333,6 +372,40 @@ def structured_run_row(
                 raise ValueError(f"Strict warm start changed genes for {run_dir}")
         if not summary.get("stage1_candidate_hash"):
             raise ValueError(f"Missing stage-one provenance hash for {run_dir}")
+    if method in MUTATION_VARIANT_RUN_SPECS:
+        spec = MUTATION_VARIANT_RUN_SPECS[method]
+        if summary.get("sequential_mode") != spec["mode"]:
+            raise ValueError(f"Sequential mode mismatch for {run_dir}")
+        expected_search = {
+            "generations": int(spec["generations"]),
+            "offspring": 16,
+            "calibration_tokens": 8192,
+            "sequence_length": 1024,
+            "selection_tokens": [512, 2048, 8192],
+            "selection_survivors": [8, 2, 1],
+        }
+        for key, expected in expected_search.items():
+            if search.get(key) != expected:
+                raise ValueError(
+                    f"Unexpected {key} for {run_dir}: "
+                    f"{search.get(key)!r} != {expected!r}"
+                )
+        compression = summary.get("compression_config", {})
+        if compression.get("joint_mutation_mode") != spec["mutation_mode"]:
+            raise ValueError(f"Unexpected mutation mode for {run_dir}")
+        if summary.get("active_budget_valid") is not True:
+            raise ValueError(f"Active budget is invalid for {run_dir}")
+        if summary.get("depth_counts_valid") is not True:
+            raise ValueError(f"Depth counts are invalid for {run_dir}")
+        if not summary.get("stage1_candidate_hash"):
+            raise ValueError(f"Missing stage-one provenance hash for {run_dir}")
+        if spec["mode"] == "quant_to_joint_warm":
+            if summary.get("sequential_quant_initialization_policy") != "strict":
+                raise ValueError(f"Quantization warm start is not strict for {run_dir}")
+            if summary.get("initial_component_changed_by_repair") is not False:
+                raise ValueError(f"Strict warm start was repaired for {run_dir}")
+            if summary.get("initial_repair_changed_gene_count") != 0:
+                raise ValueError(f"Strict warm start changed genes for {run_dir}")
     return row
 
 
@@ -491,6 +564,23 @@ def build_run_rows(runs_root: Path, results_dir: Path) -> list[dict[str, Any]]:
                 )
             )
 
+    for method, spec in MUTATION_VARIANT_RUN_SPECS.items():
+        direction = str(spec["direction"])
+        for seed in SEEDS:
+            run_id = str(spec["run_pattern"]).format(seed=seed)
+            stage1_runtime = require_finite(
+                stage1_summaries[(direction, seed)]["final_metrics"]["runtime_seconds"],
+                f"{direction} stage-one seed {seed} runtime",
+            )
+            rows.append(
+                structured_run_row(
+                    method=method,
+                    seed=seed,
+                    run_dir=runs_root / run_id,
+                    stage1_runtime_seconds=stage1_runtime,
+                )
+            )
+
     structured_baselines = {
         "joint_g20": ("thesis_medium_joint_mistral_s0.25_qproj3.0_g20_o16_seed{seed}"),
         "joint_g50": (
@@ -612,9 +702,14 @@ def paired_delta_rows(
 ) -> list[dict[str, Any]]:
     by_method_seed = {(row["method"], row["seed"]): row for row in run_rows}
     paired: list[dict[str, Any]] = []
-    for method in SEQUENTIAL_METHODS:
-        for baseline in PAIR_BASELINES:
-            for seed in SEEDS:
+    pairings = [
+        (method, baseline)
+        for method in SEQUENTIAL_METHODS
+        for baseline in PAIR_BASELINES
+    ]
+    pairings.extend(MATCHED_PAIRINGS)
+    for method, baseline in pairings:
+        for seed in SEEDS:
                 method_row = by_method_seed[(method, seed)]
                 baseline_row = by_method_seed[(baseline, seed)]
                 method_ppl = method_row["wikitext2_ppl"]
@@ -705,6 +800,28 @@ def build_markdown(
     joint_g20 = aggregate_by_method["joint_g20"]
     joint_g50 = aggregate_by_method["joint_g50"]
     interaction_g50 = aggregate_by_method["interaction_aware_g50"]
+    depthwarm_interaction_g50 = aggregate_by_method[
+        "depthwarm_interaction_aware_g50"
+    ]
+    quant_standard = aggregate_by_method["seq_quant_to_joint_warm"]
+    quant_interaction = aggregate_by_method["quantwarm_interaction_aware_g20"]
+    depth_standard_independent_delta, _, depth_standard_independent_wins = (
+        paired_summary(paired, "seq_depth_to_joint_warm", "independent")
+    )
+    quant_interaction_delta, quant_interaction_delta_std, quant_interaction_wins = (
+        paired_summary(
+            paired,
+            "quantwarm_interaction_aware_g20",
+            "seq_quant_to_joint_warm",
+        )
+    )
+    depthwarm_interaction_delta, depthwarm_interaction_delta_std, depthwarm_interaction_wins = (
+        paired_summary(
+            paired,
+            "depthwarm_interaction_aware_g50",
+            "interaction_aware_g50",
+        )
+    )
     improvement_vs_independent_percent = (
         -100 * independent_delta / independent["wikitext2_ppl_mean"]
     )
@@ -723,26 +840,29 @@ def build_markdown(
         "# Sequential Initialization Search Comparison",
         "",
         (
-            "This report compares the four sequential-initialization variants "
-            "against the existing Mistral q-projection baselines. Lower "
-            "WikiText2 perplexity (PPL) is better."
+            "This report compares five 20-generation sequential conditions, "
+            "including both mutation operators for quantization-first warm "
+            "starts, plus the completed 50-generation depth-warm interaction-aware "
+            "reference. Lower WikiText2 perplexity (PPL) is better."
         ),
         "",
         "## Scope and Validation",
         "",
         (
-            "All sequential runs use `mistralai/Mistral-7B-v0.3`, 25% separate "
-            "attention/MLP depth sparsity, a 3-bit active q-projection budget, "
-            "`group_rule=size`, 20 stage-two generations, 16 offspring, 32 "
-            "requested initial candidates, and seeds 0–2."
+            "All runs use `mistralai/Mistral-7B-v0.3`, 25% separate attention/MLP "
+            "depth sparsity, a 3-bit active q-projection budget, "
+            "`group_rule=size`, 16 offspring, and seeds 0–2. All sequential "
+            "conditions use 20 stage-two generations except Depth → Joint warm + "
+            "interaction-aware, which is explicitly labeled as a G50 reference."
         ),
         "",
         (
-            "The generator verified all 12 sequential summaries, exact depth "
+            "The generator verified 15 G20 sequential summaries and the three "
+            "depth-warm interaction-aware G50 summaries, including exact depth "
             "counts, active quantization budgets, stage-one provenance hashes, "
-            "and frozen-component invariants. Quantization-first warm starts "
-            "used strict initialization and changed zero imported genes before "
-            "initial selection."
+            "and frozen-component invariants. Both quantization-first warm-start "
+            "conditions used strict initialization and changed zero imported genes "
+            "before initial selection."
         ),
         "",
         (
@@ -755,8 +875,8 @@ def build_markdown(
         "## Executive Result",
         "",
         (
-            f"**{METHOD_METADATA[best_method]['label']} is the best sequential "
-            f"variant at {fmt(best['wikitext2_ppl_mean'])} ± "
+            f"**{METHOD_METADATA[best_method]['label']} is the best G20 sequential "
+            f"condition at {fmt(best['wikitext2_ppl_mean'])} ± "
             f"{fmt(best['wikitext2_ppl_sample_std'])} PPL.**"
         ),
         "",
@@ -772,10 +892,11 @@ def build_markdown(
             f"This is a {improvement_vs_independent_percent:.2f}% mean PPL "
             f"improvement over independent composition and a "
             f"{improvement_vs_g20_percent:.2f}% improvement over standard "
-            f"joint G20. Interaction-aware G50 reaches the lowest reference "
-            f"mean ({interaction_g50['wikitext2_ppl_mean']:.3f}), but uses a "
-            "different mutation operator and a 50-generation single-search "
-            "budget."
+            f"joint G20. Standard-initialization interaction-aware G50 reaches "
+            f"{interaction_g50['wikitext2_ppl_mean']:.3f} mean PPL; its matched "
+            f"depth-warm counterpart reaches "
+            f"{depthwarm_interaction_g50['wikitext2_ppl_mean']:.3f}. Both are "
+            "explicitly separated from the G20 conditions."
         ),
         "",
         "## Aggregate Comparison",
@@ -813,18 +934,24 @@ def build_markdown(
             "## Per-Seed Quality",
             "",
             (
-                "| Seed | Depth→Quant frozen | Depth→Joint warm | "
-                "Quant→Depth frozen | Quant→Joint warm | Independent | "
-                "Joint G20 | Joint G50 | Interaction-aware G50 |"
+                "| Seed | Depth→Quant frozen | Depth→Joint standard G20 | "
+                "Depth→Joint interaction G50 | Quant→Depth frozen | "
+                "Quant→Joint standard G20 | Quant→Joint interaction G20 | "
+                "Independent | Joint G20 | Joint G50 | Interaction-aware G50 |"
             ),
-            "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            (
+                "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
+                "---: | ---: | ---: | ---: |"
+            ),
         ]
     )
     seed_methods = (
         "seq_depth_to_quant_frozen",
         "seq_depth_to_joint_warm",
+        "depthwarm_interaction_aware_g50",
         "seq_quant_to_depth_frozen",
         "seq_quant_to_joint_warm",
+        "quantwarm_interaction_aware_g20",
         "independent",
         "joint_g20",
         "joint_g50",
@@ -864,6 +991,29 @@ def build_markdown(
     lines.extend(
         [
             "",
+            "## Targeted Warm-Start and Mutation Comparisons",
+            "",
+            (
+                "| Comparison | Mean paired delta ± SD | Seed wins | "
+                "Interpretation |"
+            ),
+            "| --- | ---: | ---: | --- |",
+            (
+                "| Quant warm interaction-aware G20 − quant warm standard G20 | "
+                f"{fmt(quant_interaction_delta, signed=True)} ± "
+                f"{fmt(quant_interaction_delta_std)} | "
+                f"{quant_interaction_wins}/3 | Same initialization direction and "
+                "stage-two budget; mutation operator changes. |"
+            ),
+            (
+                "| Depth-warm interaction-aware G50 − standard-initialization "
+                "interaction-aware G50 | "
+                f"{fmt(depthwarm_interaction_delta, signed=True)} ± "
+                f"{fmt(depthwarm_interaction_delta_std)} | "
+                f"{depthwarm_interaction_wins}/3 | Same interaction-aware operator "
+                "and G50 schedule; initialization changes. |"
+            ),
+            "",
             "## Search-Dynamics Diagnostics",
             "",
             (
@@ -895,9 +1045,10 @@ def build_markdown(
             "## Interpretation",
             "",
             (
-                f"- Depth → Joint warm-starting improves on independent "
-                f"composition by {-independent_delta:.3f} PPL on average and "
-                f"wins {independent_wins}/3 paired seeds. It also has the "
+                f"- Depth → Joint warm + standard G20 improves on independent "
+                f"composition by {-depth_standard_independent_delta:.3f} PPL on "
+                f"average and wins {depth_standard_independent_wins}/3 paired "
+                f"seeds. It also has the "
                 f"lowest sample SD among the sequential variants."
             ),
             (
@@ -914,9 +1065,12 @@ def build_markdown(
                 "structural exchanges are reachable."
             ),
             (
-                "- Quantization → Joint warm-starting is close to standard "
-                "joint G20 on mean PPL, but does not show the consistent benefit "
-                "observed for depth-first warm-starting."
+                f"- Quantization → Joint warm + interaction-aware G20 reaches "
+                f"{quant_interaction['wikitext2_ppl_mean']:.3f} mean PPL versus "
+                f"{quant_standard['wikitext2_ppl_mean']:.3f} for the same warm "
+                f"start with standard mutation. The paired delta is "
+                f"{quant_interaction_delta:+.3f} PPL with "
+                f"{quant_interaction_wins}/3 seed wins."
             ),
             (
                 f"- Standard joint G50 is {g50_delta:.3f} PPL better than the "
@@ -925,10 +1079,11 @@ def build_markdown(
                 "sequential pipeline."
             ),
             (
-                "- Interaction-aware G50 is reported as a separate method "
-                "reference. Its 50-generation budget and mutation operator "
-                "differ from the G20 standard operator used in every sequential "
-                "stage-two run."
+                f"- Under the same interaction-aware G50 operator and schedule, "
+                f"depth warm-starting changes mean PPL by "
+                f"{depthwarm_interaction_delta:+.3f} relative to standard "
+                f"initialization and wins {depthwarm_interaction_wins}/3 seeds. "
+                "This comparison is kept separate from the G20 matrix."
             ),
             "",
             "## Compute Accounting",
@@ -978,15 +1133,15 @@ def build_markdown(
             "- Sequential initialization is direction-dependent.",
             "- A strong depth solution is a useful warm start for joint refinement.",
             "- Freezing quantization restricts depth exploration and produces high seed variance.",
-            "- Warm-starting from quantization alone does not materially improve standard joint G20.",
-            "- Depth → Joint warm-starting is the best sequential variant, but standard joint G50 remains better on mean PPL.",
+            "- Interaction-aware mutation improves the quantization-first warm G20 result relative to its standard-mutation counterpart.",
+            "- Depth → Joint warm + standard remains the best G20 sequential condition; the G50 interaction-aware comparisons are reported separately.",
             "- Report stage-two and end-to-end search cost separately.",
             "",
             "## Generated Artifacts",
             "",
             "- `results/sequential_search_runs.csv`: seed-level metrics, provenance, invariants, runtime accounting, and mutation diagnostics.",
             "- `results/sequential_search_summary.csv`: method-level mean and sample standard deviation.",
-            "- `results/sequential_search_paired_deltas.csv`: paired seed-level deltas for every sequential variant and baseline.",
+            "- `results/sequential_search_paired_deltas.csv`: paired seed-level deltas for every G20 sequential condition, baseline, and targeted mutation comparison.",
             "- `results/sequential_search_comparison.png`: presentation-ready quality comparison.",
             "- `results/sequential_search_comparison.md`: this report.",
         ]
@@ -1018,11 +1173,12 @@ def create_plot(
         "seq_depth_to_joint_warm": "#167c80",
         "seq_quant_to_depth_frozen": "#d98e32",
         "seq_quant_to_joint_warm": "#b85c74",
+        "quantwarm_interaction_aware_g20": "#8f3f62",
     }
     fig, axes = plt.subplots(
         1,
         2,
-        figsize=(14, 6.5),
+        figsize=(16, 6.5),
         gridspec_kw={"width_ratios": [1, 1.25]},
     )
 
@@ -1063,25 +1219,25 @@ def create_plot(
         [METHOD_METADATA[method]["short_label"] for method in SEQUENTIAL_METHODS],
     )
     ax.set_ylabel("WikiText2 perplexity (lower is better)")
-    ax.set_title("A. Sequential initialization variants")
+    ax.set_title("A. G20 sequential conditions")
     ax.grid(axis="y", alpha=0.25, zorder=0)
 
     ax = axes[1]
     comparison_methods = (
-        "depth_uniform",
-        "independent",
         "joint_g20",
         "seq_depth_to_joint_warm",
-        "joint_g50",
+        "seq_quant_to_joint_warm",
+        "quantwarm_interaction_aware_g20",
         "interaction_aware_g50",
+        "depthwarm_interaction_aware_g50",
     )
     comparison_colors = (
-        "#b9bec5",
-        "#8d99a6",
         "#54789c",
         sequential_colors["seq_depth_to_joint_warm"],
-        "#355a82",
+        sequential_colors["seq_quant_to_joint_warm"],
+        sequential_colors["quantwarm_interaction_aware_g20"],
         "#76568c",
+        "#4f3768",
     )
     x_positions = list(range(len(comparison_methods)))
     means = [
@@ -1126,7 +1282,7 @@ def create_plot(
         x_positions,
         [METHOD_METADATA[method]["short_label"] for method in comparison_methods],
     )
-    ax.set_title("B. Best sequential variant and existing references")
+    ax.set_title("B. Warm starts under standard and interaction-aware mutation")
     ax.grid(axis="y", alpha=0.25, zorder=0)
 
     lower = min(
@@ -1152,7 +1308,7 @@ def create_plot(
         0.015,
         (
             "Bars show mean ± sample SD; black dots show seeds 0–2. "
-            "G50 references use a larger single-search budget than G20 stage two."
+            "G20 and G50 labels must be compared within their stated budgets."
         ),
         ha="center",
         fontsize=9,
