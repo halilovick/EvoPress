@@ -33,6 +33,45 @@ class RunJointSearchTinyTest(unittest.TestCase):
             self.assertIn("--generations 10", result.stdout)
             self.assertIn("--offspring 8", result.stdout)
             self.assertIn("--calibration_sequence_length 1024", result.stdout)
+            self.assertIn("--population_size 1", result.stdout)
+            self.assertIn("--crossover_probability 0.0", result.stdout)
+            self.assertIn("--crossover_type component", result.stdout)
+            self.assertFalse(output_dir.exists())
+
+    def test_dry_run_supports_component_crossover(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "outputs" / "joint"
+            result = self.run_command(
+                [str(LAUNCHER), "--dry-run"],
+                {
+                    "OUTPUT_DIR": str(output_dir),
+                    "POPULATION_SIZE": "4",
+                    "CROSSOVER_PROBABILITY": "0.25",
+                    "CROSSOVER_TYPE": "component",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--population_size 4", result.stdout)
+            self.assertIn("--crossover_probability 0.25", result.stdout)
+            self.assertIn("--crossover_type component", result.stdout)
+            self.assertFalse(output_dir.exists())
+
+    def test_crossover_rejects_sequential_mode_without_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "outputs" / "joint"
+            result = self.run_command(
+                [str(LAUNCHER)],
+                {
+                    "OUTPUT_DIR": str(output_dir),
+                    "POPULATION_SIZE": "4",
+                    "CROSSOVER_PROBABILITY": "0.25",
+                    "SEQUENTIAL_MODE": "depth_to_joint_warm",
+                },
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("require SEQUENTIAL_MODE=none", result.stderr)
             self.assertFalse(output_dir.exists())
 
     def test_fixture_run_writes_joint_artifacts_and_log_row(self) -> None:

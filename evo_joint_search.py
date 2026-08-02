@@ -227,6 +227,87 @@ def selected_candidate_metadata(
     return selected_metadata
 
 
+def crossover_is_enabled(population_size: int, crossover_probability: float) -> bool:
+    return population_size > 1 and crossover_probability > 0.0
+
+
+def effective_survivors_per_selection(
+    configured_survivors: Sequence[int],
+    population_size: int,
+) -> List[int]:
+    """Keep intermediate stages unchanged and resize only the final stage."""
+    if not configured_survivors:
+        raise ValueError("At least one selection stage is required.")
+    if population_size < 1:
+        raise ValueError("population_size must be at least 1.")
+
+    effective_survivors = list(configured_survivors)
+    effective_survivors[-1] = population_size
+    return effective_survivors
+
+
+def unique_candidate_count(candidates) -> int:
+    unique_candidates = []
+    for candidate in candidates:
+        if candidate not in unique_candidates:
+            unique_candidates.append(candidate)
+    return len(unique_candidates)
+
+
+def validate_persistent_population(
+    population,
+    population_size: int,
+    *,
+    context: str,
+) -> None:
+    unique_count = unique_candidate_count(population)
+    if len(population) != population_size or unique_count != population_size:
+        raise RuntimeError(
+            f"Unable to retain {population_size} unique feasible candidates "
+            f"for {context}: retained={len(population)}, unique={unique_count}."
+        )
+
+
+def add_persistent_parents_for_elitism(
+    candidates,
+    candidate_metadata,
+    persistent_population,
+):
+    if len(candidates) != len(candidate_metadata):
+        raise ValueError("Candidate pool and metadata must have equal lengths.")
+
+    final_candidates = list(candidates)
+    final_metadata = list(candidate_metadata)
+    for persistent_parent in persistent_population:
+        if persistent_parent not in final_candidates:
+            final_candidates.append(persistent_parent)
+            final_metadata.append("parent")
+    return final_candidates, final_metadata
+
+
+def select_distinct_parents(population):
+    unique_population = []
+    for candidate in population:
+        if candidate not in unique_population:
+            unique_population.append(candidate)
+    if len(unique_population) < 2:
+        raise ValueError(
+            "Component crossover requires at least two distinct persistent parents."
+        )
+    return tuple(random.sample(unique_population, 2))
+
+
+def select_mutation_parent(population):
+    if len(population) == 1:
+        # Avoid consuming randomness on the legacy single-parent path.
+        return population[0]
+    return random.choice(population)
+
+
+def candidate_is_duplicate(candidate, *candidate_collections) -> bool:
+    return any(candidate in candidates for candidates in candidate_collections)
+
+
 def adaptive_mutation_strength(
     stagnation_generations: int,
     patience: int,
@@ -550,6 +631,128 @@ def count_quant_state_changes(before, after) -> int:
     )
 
 
+def component_crossover(parent_a, parent_b, *, use_depth_from_a=None):
+    """Recombine one parent's depth mask with the other parent's quant state."""
+    if parent_a == parent_b:
+        raise ValueError("Component crossover parents must be distinct.")
+    if use_depth_from_a is None:
+        use_depth_from_a = bool(random.getrandbits(1))
+
+    if use_depth_from_a:
+        child = {
+            "drop": copy.deepcopy(parent_a["drop"]),
+            "quant": copy.deepcopy(parent_b["quant"]),
+        }
+        source_details = {"depth_parent": "a", "quant_parent": "b"}
+    else:
+        child = {
+            "drop": copy.deepcopy(parent_b["drop"]),
+            "quant": copy.deepcopy(parent_a["quant"]),
+        }
+        source_details = {"depth_parent": "b", "quant_parent": "a"}
+
+    return child, source_details
+
+
+def validate_quant_reconstruction_files(
+    grouped_layer_names,
+    quant_weights_path,
+    quant_state,
+) -> None:
+    if len(grouped_layer_names) != len(quant_state):
+        raise ValueError("Quantization state does not match the number of groups.")
+
+    missing_files = []
+    for group_id, group in enumerate(grouped_layer_names):
+        if len(group) != len(quant_state[group_id]):
+            raise ValueError(
+                "Quantization state group length does not match module names."
+            )
+        for layer_name, level in zip(group, quant_state[group_id]):
+            weight_path = os.path.join(
+                quant_weights_path,
+                layer_name,
+                f"{level}.pth",
+            )
+            if not os.path.isfile(weight_path):
+                missing_files.append(weight_path)
+
+    if missing_files:
+        raise FileNotFoundError(
+            "Crossover candidate references unavailable quantization "
+            f"reconstruction files: {missing_files[:3]}"
+        )
+
+
+def try_component_crossover(
+    parent_a,
+    parent_b,
+    *,
+    grouped_layer_names,
+    quant_weights_path,
+    target_bitwidth: float,
+    total_blocks: int,
+    blocks_to_remove: int,
+    active_quant_budget: bool,
+    step_size: int = 1,
+    drop_entire_block: bool = False,
+    use_depth_from_a=None,
+):
+    """Build, repair, and validate one component-crossover proposal."""
+    details = {
+        "classification": "component crossover",
+        "repair_changed_gene_count": 0,
+        "rejection_reason": None,
+    }
+    try:
+        child, source_details = component_crossover(
+            parent_a,
+            parent_b,
+            use_depth_from_a=use_depth_from_a,
+        )
+        details.update(source_details)
+        validate_depth_counts(
+            child["drop"],
+            total_blocks,
+            blocks_to_remove,
+            drop_entire_block,
+        )
+
+        if active_quant_budget:
+            initial_quant = copy.deepcopy(child["quant"])
+            child["quant"] = repair_active_quant_budget(
+                grouped_layer_names,
+                quant_weights_path,
+                child["quant"],
+                child["drop"],
+                target_bitwidth,
+                step_size,
+            )
+            details["repair_changed_gene_count"] = count_quant_state_changes(
+                initial_quant,
+                child["quant"],
+            )
+            validate_active_quant_budget(
+                grouped_layer_names,
+                child["quant"],
+                child["drop"],
+                target_bitwidth,
+            )
+
+        validate_quant_reconstruction_files(
+            grouped_layer_names,
+            quant_weights_path,
+            child["quant"],
+        )
+    except (FileNotFoundError, RuntimeError, ValueError) as error:
+        details["rejection_reason"] = str(error)
+        return None, details
+
+    if details["repair_changed_gene_count"] > 0:
+        details["classification"] = "component crossover + repair"
+    return child, details
+
+
 def layer_index(layer_name: str) -> Optional[int]:
     match = LAYER_INDEX_RE.search(layer_name)
     return int(match.group(1)) if match is not None else None
@@ -809,6 +1012,27 @@ def parse_args(argv=None):
     parser.add_argument("--initial_tokens", required=True, type=int)
     parser.add_argument("--survivors_per_selection", nargs="+", required=True, type=int)
     parser.add_argument("--tokens_per_selection", nargs="+", required=True, type=int)
+    parser.add_argument(
+        "--population_size",
+        "--population-size",
+        default=1,
+        type=int,
+        help="Number of unique candidates retained between generations.",
+    )
+    parser.add_argument(
+        "--crossover_probability",
+        "--crossover-probability",
+        default=0.0,
+        type=float,
+        help="Probability that an offspring proposal uses component crossover.",
+    )
+    parser.add_argument(
+        "--crossover_type",
+        "--crossover-type",
+        default="component",
+        choices=["component"],
+        help="Crossover operator. This pilot supports component crossover only.",
+    )
 
     parser.add_argument("--dtype", default="auto", choices=["auto", "float16", "float32", "bfloat16"])
     parser.add_argument("--attn_implementation", default=None, choices=["eager", "sdpa", "flash_attention_2"])
@@ -863,6 +1087,32 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+def validate_crossover_configuration(args) -> None:
+    if args.population_size < 1:
+        raise ValueError("--population_size must be at least 1.")
+    if not 0.0 <= args.crossover_probability <= 1.0:
+        raise ValueError("--crossover_probability must be between 0 and 1.")
+    if args.crossover_probability > 0.0 and args.population_size < 2:
+        raise ValueError(
+            "--crossover_probability greater than 0 requires "
+            "--population_size at least 2."
+        )
+    if args.population_size > args.initially_generated:
+        raise ValueError(
+            "--population_size cannot exceed --initially_generated because "
+            "the initial population must contain unique feasible candidates."
+        )
+
+    population_extension_requested = (
+        args.population_size != 1 or args.crossover_probability != 0.0
+    )
+    if args.sequential_mode != "none" and population_extension_requested:
+        raise ValueError(
+            "Component crossover and persistent populations are supported only "
+            "with --sequential_mode none in this pilot."
+        )
+
+
 def validate_joint_search_args(args):
     if len(args.survivors_per_selection) != len(args.tokens_per_selection):
         raise ValueError(
@@ -908,12 +1158,21 @@ def validate_joint_search_args(args):
             "--coarse_to_fine_start_strength must be greater than or equal "
             "to --coarse_to_fine_end_strength."
         )
+    validate_crossover_configuration(args)
     validate_sequential_cli(args)
 
 
 def main():
     args = parse_args()
     validate_joint_search_args(args)
+    effective_selection_survivors = effective_survivors_per_selection(
+        args.survivors_per_selection,
+        args.population_size,
+    )
+    crossover_enabled = crossover_is_enabled(
+        args.population_size,
+        args.crossover_probability,
+    )
     stage1_artifacts = (
         resolve_stage1_artifacts(args.stage1_run_dir, args.stage1_candidate)
         if args.sequential_mode != "none"
@@ -1017,6 +1276,12 @@ def main():
     print(f"Quant budget scope: {'active' if args.active_quant_budget else 'all'}")
     print(f"Joint mutation mode: {args.joint_mutation_mode}")
     print(f"Sequential mode: {args.sequential_mode}")
+    print(f"Persistent population size: {args.population_size}")
+    print(f"Crossover enabled: {crossover_enabled}")
+    print(
+        "Effective survivors per selection: "
+        f"{effective_selection_survivors}"
+    )
 
     stage1_import = None
     if args.sequential_mode in DEPTH_FIRST_MODES:
@@ -1215,11 +1480,16 @@ def main():
         grouped_layer_names=grouped_layer_names,
         quant_weights_path=args.quant_weights_path,
         candidates=initial_candidates,
-        num_survive=1,
+        num_survive=args.population_size,
         calibration_data=calibration_data,
         num_tokens=args.initial_tokens,
         fitness_fn=args.fitness_fn,
         target_logits=target_logits,
+    )
+    validate_persistent_population(
+        population,
+        args.population_size,
+        context="initial selection",
     )
 
     parent = population[0]
@@ -1256,7 +1526,12 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     stagnation_generations = 0
+    crossover_offspring_attempted_total = 0
+    crossover_offspring_accepted_total = 0
+    crossover_repair_changed_gene_count_total = 0
+    mutation_offspring_accepted_total = 0
     for generation in range(args.generations):
+        generation_population = copy.deepcopy(population)
         generation_parent = copy.deepcopy(parent)
         generation_train_fitness = train_fitness
         if args.adaptive_mutation:
@@ -1321,6 +1596,8 @@ def main():
             "interaction_aware": 0,
             "sequential_quantization": 0,
             "fixed_quant_depth": 0,
+            "component crossover": 0,
+            "component crossover + repair": 0,
         }
         depth_change_totals = {
             "depth": 0,
@@ -1329,6 +1606,8 @@ def main():
             "interaction_aware": 0,
             "sequential_quantization": 0,
             "fixed_quant_depth": 0,
+            "component crossover": 0,
+            "component crossover + repair": 0,
         }
         quant_change_totals = {
             "depth": 0,
@@ -1337,6 +1616,8 @@ def main():
             "interaction_aware": 0,
             "sequential_quantization": 0,
             "fixed_quant_depth": 0,
+            "component crossover": 0,
+            "component crossover + repair": 0,
         }
         interaction_aware_totals = {
             "budget_repair_quant_changes": 0,
@@ -1348,6 +1629,12 @@ def main():
         duplicate_candidates = 0
         infeasible_candidates = 0
         fixed_quant_legal_swap_counts = []
+        crossover_offspring_attempted = 0
+        crossover_offspring_accepted = 0
+        crossover_duplicates = 0
+        crossover_infeasible_candidates = 0
+        crossover_repair_changed_gene_count = 0
+        mutation_offspring_accepted = 0
 
         while len(offspring_list) < args.offspring:
             offspring_attempts += 1
@@ -1366,136 +1653,186 @@ def main():
                     "fixed_quant_legal_swap_count="
                     f"{fixed_quant_legal_swap_counts[-1] if fixed_quant_legal_swap_counts else None}."
                 )
-            offspring = copy.deepcopy(parent)
-            interaction_details = None
-
-            use_joint_aware = (
-                args.joint_aware_mutation
-                and random.random() < args.joint_aware_probability
+            use_component_crossover = (
+                crossover_enabled
+                and random.random() < args.crossover_probability
             )
-            if args.sequential_mode == "depth_to_quant_frozen":
-                mutation_type = "sequential_quantization"
-                for _ in range(quant_mutation_count):
-                    offspring["quant"] = mutate_quant_state(
-                        model,
-                        grouped_layer_names,
-                        args.quant_weights_path,
-                        offspring["quant"],
-                        args.step_size,
-                        offspring["drop"] if args.active_quant_budget else None,
-                    )
-            elif args.sequential_mode == "quant_to_depth_frozen":
-                mutation_type = "fixed_quant_depth"
-                offspring, fixed_quant_details = mutate_fixed_quant_depth_candidate(
-                    offspring,
-                    grouped_layer_names,
+            interaction_details = None
+            if use_component_crossover:
+                crossover_offspring_attempted += 1
+                crossover_offspring_attempted_total += 1
+                parent_a, parent_b = select_distinct_parents(population)
+                reference_parent = parent_a
+                offspring, crossover_details = try_component_crossover(
+                    parent_a,
+                    parent_b,
+                    grouped_layer_names=grouped_layer_names,
+                    quant_weights_path=args.quant_weights_path,
                     target_bitwidth=args.target_bitwidth,
+                    total_blocks=total_blocks,
+                    blocks_to_remove=blocks_to_remove,
+                    active_quant_budget=args.active_quant_budget,
+                    step_size=args.step_size,
                     drop_entire_block=args.drop_entire_block,
-                    max_mutations=depth_mutation_limit,
-                )
-                fixed_quant_legal_swap_counts.append(
-                    fixed_quant_details["legal_swap_count"]
                 )
                 if offspring is None:
-                    no_op_mutations += 1
+                    infeasible_candidates += 1
+                    crossover_infeasible_candidates += 1
                     continue
-            elif args.joint_mutation_mode == "interaction_aware":
-                mutation_type = "interaction_aware"
-                offspring, interaction_details = mutate_interaction_aware_candidate(
-                    model,
-                    grouped_layer_names,
-                    args.quant_weights_path,
-                    offspring,
-                    args.target_bitwidth,
-                    args.step_size,
-                    args.drop_entire_block,
-                    depth_mutation_limit,
-                    quant_mutation_count,
-                )
-            elif use_joint_aware:
-                mutation_type = "joint_aware"
-                offspring = mutate_joint_aware_candidate(
-                    model,
-                    grouped_layer_names,
-                    args.quant_weights_path,
-                    offspring,
-                    args.target_bitwidth,
-                    args.step_size,
-                    args.drop_entire_block,
-                )
-            elif random.random() < 0.5:
-                mutation_type = "depth"
-                offspring["drop"] = mutate_drop_state(
-                    offspring["drop"],
-                    args.drop_entire_block,
-                    depth_mutation_limit,
-                )
-                if args.active_quant_budget:
-                    offspring["quant"] = repair_active_quant_budget(
-                        grouped_layer_names,
-                        args.quant_weights_path,
-                        offspring["quant"],
-                        offspring["drop"],
-                        args.target_bitwidth,
-                        args.step_size,
-                    )
+                crossover_repair_changed_gene_count += crossover_details[
+                    "repair_changed_gene_count"
+                ]
+                crossover_repair_changed_gene_count_total += crossover_details[
+                    "repair_changed_gene_count"
+                ]
+                mutation_type = crossover_details["classification"]
             else:
-                mutation_type = "quantization"
-                for _ in range(quant_mutation_count):
-                    offspring["quant"] = mutate_quant_state(
+                reference_parent = select_mutation_parent(population)
+                offspring = copy.deepcopy(reference_parent)
+                use_joint_aware = (
+                    args.joint_aware_mutation
+                    and random.random() < args.joint_aware_probability
+                )
+                if args.sequential_mode == "depth_to_quant_frozen":
+                    mutation_type = "sequential_quantization"
+                    for _ in range(quant_mutation_count):
+                        offspring["quant"] = mutate_quant_state(
+                            model,
+                            grouped_layer_names,
+                            args.quant_weights_path,
+                            offspring["quant"],
+                            args.step_size,
+                            (
+                                offspring["drop"]
+                                if args.active_quant_budget
+                                else None
+                            ),
+                        )
+                elif args.sequential_mode == "quant_to_depth_frozen":
+                    mutation_type = "fixed_quant_depth"
+                    offspring, fixed_quant_details = mutate_fixed_quant_depth_candidate(
+                        offspring,
+                        grouped_layer_names,
+                        target_bitwidth=args.target_bitwidth,
+                        drop_entire_block=args.drop_entire_block,
+                        max_mutations=depth_mutation_limit,
+                    )
+                    fixed_quant_legal_swap_counts.append(
+                        fixed_quant_details["legal_swap_count"]
+                    )
+                    if offspring is None:
+                        no_op_mutations += 1
+                        continue
+                elif args.joint_mutation_mode == "interaction_aware":
+                    mutation_type = "interaction_aware"
+                    offspring, interaction_details = mutate_interaction_aware_candidate(
                         model,
                         grouped_layer_names,
                         args.quant_weights_path,
-                        offspring["quant"],
-                        args.step_size,
-                        offspring["drop"] if args.active_quant_budget else None,
-                    )
-
-            if args.sequential_mode != "none":
-                validate_depth_counts(
-                    offspring["drop"],
-                    total_blocks,
-                    blocks_to_remove,
-                    args.drop_entire_block,
-                )
-                if args.active_quant_budget:
-                    validate_active_quant_budget(
-                        grouped_layer_names,
-                        offspring["quant"],
-                        offspring["drop"],
+                        offspring,
                         args.target_bitwidth,
+                        args.step_size,
+                        args.drop_entire_block,
+                        depth_mutation_limit,
+                        quant_mutation_count,
                     )
-                if args.sequential_mode == "depth_to_quant_frozen":
-                    validate_frozen_component(
+                elif use_joint_aware:
+                    mutation_type = "joint_aware"
+                    offspring = mutate_joint_aware_candidate(
+                        model,
+                        grouped_layer_names,
+                        args.quant_weights_path,
                         offspring,
-                        stage1_import.component,
-                        "depth",
+                        args.target_bitwidth,
+                        args.step_size,
+                        args.drop_entire_block,
                     )
-                elif args.sequential_mode == "quant_to_depth_frozen":
-                    validate_frozen_component(
-                        offspring,
-                        stage1_import.component,
-                        "quantization",
+                elif random.random() < 0.5:
+                    mutation_type = "depth"
+                    offspring["drop"] = mutate_drop_state(
+                        offspring["drop"],
+                        args.drop_entire_block,
+                        depth_mutation_limit,
                     )
+                    if args.active_quant_budget:
+                        offspring["quant"] = repair_active_quant_budget(
+                            grouped_layer_names,
+                            args.quant_weights_path,
+                            offspring["quant"],
+                            offspring["drop"],
+                            args.target_bitwidth,
+                            args.step_size,
+                        )
+                else:
+                    mutation_type = "quantization"
+                    for _ in range(quant_mutation_count):
+                        offspring["quant"] = mutate_quant_state(
+                            model,
+                            grouped_layer_names,
+                            args.quant_weights_path,
+                            offspring["quant"],
+                            args.step_size,
+                            (
+                                offspring["drop"]
+                                if args.active_quant_budget
+                                else None
+                            ),
+                        )
 
-            if offspring == parent:
-                no_op_mutations += 1
-                continue
-            if offspring in offspring_list:
+                if args.sequential_mode != "none":
+                    validate_depth_counts(
+                        offspring["drop"],
+                        total_blocks,
+                        blocks_to_remove,
+                        args.drop_entire_block,
+                    )
+                    if args.active_quant_budget:
+                        validate_active_quant_budget(
+                            grouped_layer_names,
+                            offspring["quant"],
+                            offspring["drop"],
+                            args.target_bitwidth,
+                        )
+                    if args.sequential_mode == "depth_to_quant_frozen":
+                        validate_frozen_component(
+                            offspring,
+                            stage1_import.component,
+                            "depth",
+                        )
+                    elif args.sequential_mode == "quant_to_depth_frozen":
+                        validate_frozen_component(
+                            offspring,
+                            stage1_import.component,
+                            "quantization",
+                        )
+
+                if offspring == reference_parent:
+                    no_op_mutations += 1
+                    continue
+
+            if candidate_is_duplicate(offspring, population, offspring_list):
                 duplicate_candidates += 1
+                if use_component_crossover:
+                    crossover_duplicates += 1
                 continue
 
             offspring_list.append(offspring)
             offspring_mutation_types.append(mutation_type)
             mutation_counts[mutation_type] += 1
             depth_change_totals[mutation_type] += count_drop_state_changes(
-                parent["drop"],
+                reference_parent["drop"],
                 offspring["drop"],
             )
             quant_change_totals[mutation_type] += count_quant_state_changes(
-                parent["quant"],
+                reference_parent["quant"],
                 offspring["quant"],
             )
+            if use_component_crossover:
+                crossover_offspring_accepted += 1
+                crossover_offspring_accepted_total += 1
+            else:
+                mutation_offspring_accepted += 1
+                mutation_offspring_accepted_total += 1
             if interaction_details is not None:
                 interaction_aware_totals[
                     "budget_repair_quant_changes"
@@ -1507,11 +1844,36 @@ def main():
                     "fallback_quant_exchanges_used"
                 ] += int(interaction_details["fallback_quant_exchange_used"])
 
-        for num_survive, num_tokens in zip(args.survivors_per_selection, args.tokens_per_selection):
-            if num_survive == args.survivors_per_selection[-1]:
-                if parent not in offspring_list:
-                    offspring_list.append(parent)
-                    offspring_mutation_types.append("parent")
+        for selection_stage, (num_survive, num_tokens) in enumerate(
+            zip(effective_selection_survivors, args.tokens_per_selection)
+        ):
+            is_final_selection_stage = (
+                selection_stage == len(effective_selection_survivors) - 1
+            )
+            legacy_elitism_stage = (
+                args.population_size == 1
+                and args.survivors_per_selection[selection_stage]
+                == args.survivors_per_selection[-1]
+            )
+            if is_final_selection_stage or legacy_elitism_stage:
+                offspring_list, offspring_mutation_types = (
+                    add_persistent_parents_for_elitism(
+                        offspring_list,
+                        offspring_mutation_types,
+                        generation_population,
+                    )
+                )
+
+            if (
+                is_final_selection_stage
+                and unique_candidate_count(offspring_list) < args.population_size
+            ):
+                raise RuntimeError(
+                    "Unable to retain the requested unique feasible persistent "
+                    "population before final-stage selection: "
+                    f"requested={args.population_size}, "
+                    f"available_unique={unique_candidate_count(offspring_list)}."
+                )
 
             candidate_pool = offspring_list
             mutation_type_pool = offspring_mutation_types
@@ -1560,7 +1922,15 @@ def main():
                             "quantization",
                         )
 
-        parent = offspring_list[0]
+            if is_final_selection_stage:
+                validate_persistent_population(
+                    offspring_list,
+                    args.population_size,
+                    context=f"generation {generation + 1} final selection",
+                )
+
+        population = offspring_list
+        parent = population[0]
         train_fitness = train_fitnesses[0]
         selected_parent_mutation_type = offspring_mutation_types[0]
         accepted_parent_replacement = parent != generation_parent
@@ -1650,6 +2020,32 @@ def main():
                         quant_change_totals.values()
                     ),
                     "interaction_aware_details": interaction_aware_totals,
+                    "crossover_diagnostics": {
+                        "crossover_offspring": crossover_offspring_accepted,
+                        "mutation_offspring": mutation_offspring_accepted,
+                        "crossover_offspring_attempted": (
+                            crossover_offspring_attempted
+                        ),
+                        "crossover_duplicates": crossover_duplicates,
+                        "crossover_infeasible_candidates": (
+                            crossover_infeasible_candidates
+                        ),
+                        "crossover_repair_changed_gene_count": (
+                            crossover_repair_changed_gene_count
+                        ),
+                        "persistent_population_size": len(population),
+                        "unique_population_size": unique_candidate_count(
+                            population
+                        ),
+                        "best_population_fitness": train_fitness,
+                        "configured_survivors_per_selection": survivors,
+                        "effective_survivors_per_selection": list(
+                            effective_selection_survivors
+                        ),
+                        "effective_final_survivor_count": (
+                            effective_selection_survivors[-1]
+                        ),
+                    },
                     "offspring_generation": {
                         "attempts": offspring_attempts,
                         "no_op_mutations": no_op_mutations,
@@ -1819,6 +2215,20 @@ def main():
         active_budget_valid=final_active_budget_valid,
         depth_counts_valid=final_depth_counts_valid,
     )
+    crossover_summary = {
+        "population_size": args.population_size,
+        "crossover_probability": args.crossover_probability,
+        "crossover_type": args.crossover_type,
+        "crossover_enabled": crossover_enabled,
+        "crossover_offspring_attempted": crossover_offspring_attempted_total,
+        "crossover_offspring_accepted": crossover_offspring_accepted_total,
+        "crossover_repair_changed_gene_count": (
+            crossover_repair_changed_gene_count_total
+        ),
+        "mutation_offspring_accepted": mutation_offspring_accepted_total,
+        "population_unique_count": unique_candidate_count(population),
+        "effective_final_survivor_count": effective_selection_survivors[-1],
+    }
     reporter.write_summary(
         model_name=args.model_name_or_path,
         dataset_calibration=args.calibration_data,
@@ -1841,6 +2251,19 @@ def main():
             "max_initialization_attempts": args.max_initialization_attempts,
             "max_offspring_attempts": args.max_offspring_attempts,
             "initial_candidates_evaluated": len(initial_candidates),
+            "population_size": args.population_size,
+            "crossover_probability": args.crossover_probability,
+            "crossover_type": args.crossover_type,
+            "crossover_enabled": crossover_enabled,
+            "configured_survivors_per_selection": list(
+                args.survivors_per_selection
+            ),
+            "effective_survivors_per_selection": list(
+                effective_selection_survivors
+            ),
+            "effective_final_survivor_count": (
+                effective_selection_survivors[-1]
+            ),
         },
         compression_config={
             "target_depth_sparsity": args.drop_sparsity,
@@ -1898,7 +2321,7 @@ def main():
                 stage1_import.candidate_path if stage1_import else None
             ),
         },
-        extra_summary=sequential_summary,
+        extra_summary={**sequential_summary, **crossover_summary},
     )
 
 

@@ -21,6 +21,9 @@ INITIALLY_GENERATED="${INITIALLY_GENERATED:-16}"
 INITIAL_TOKENS="${INITIAL_TOKENS:-512}"
 SURVIVORS_PER_SELECTION="${SURVIVORS_PER_SELECTION:-2 1}"
 TOKENS_PER_SELECTION="${TOKENS_PER_SELECTION:-512 2048}"
+POPULATION_SIZE="${POPULATION_SIZE:-1}"
+CROSSOVER_PROBABILITY="${CROSSOVER_PROBABILITY:-0.0}"
+CROSSOVER_TYPE="${CROSSOVER_TYPE:-component}"
 FITNESS_FN="${FITNESS_FN:-kl}"
 GROUP_RULE="${GROUP_RULE:-none}"
 ACTIVE_QUANT_BUDGET="${ACTIVE_QUANT_BUDGET:-0}"
@@ -79,6 +82,9 @@ Defaults:
   JOINT_AWARE_MUTATION=0
   ADAPTIVE_MUTATION=0
   SEQUENTIAL_MODE=none
+  POPULATION_SIZE=1
+  CROSSOVER_PROBABILITY=0.0
+  CROSSOVER_TYPE=component
 
 Examples:
   scripts/run_joint_search_tiny.sh --dry-run
@@ -134,6 +140,9 @@ COMMAND=(
     --initial_tokens "$INITIAL_TOKENS"
     --survivors_per_selection "${SURVIVORS_PER_SELECTION_ARGS[@]}"
     --tokens_per_selection "${TOKENS_PER_SELECTION_ARGS[@]}"
+    --population_size "$POPULATION_SIZE"
+    --crossover_probability "$CROSSOVER_PROBABILITY"
+    --crossover_type "$CROSSOVER_TYPE"
     --fitness_fn "$FITNESS_FN"
     --group_rule "$GROUP_RULE"
     --joint_mutation_mode "$JOINT_MUTATION_MODE"
@@ -200,6 +209,37 @@ check_runtime_dependencies() {
 }
 
 validate_configuration() {
+    if [[ ! "$POPULATION_SIZE" =~ ^[1-9][0-9]*$ ]]; then
+        printf 'POPULATION_SIZE must be a positive integer.\n' >&2
+        return 2
+    fi
+    if ((POPULATION_SIZE > INITIALLY_GENERATED)); then
+        printf 'POPULATION_SIZE cannot exceed INITIALLY_GENERATED.\n' >&2
+        return 2
+    fi
+    if ! awk -v probability="$CROSSOVER_PROBABILITY" 'BEGIN {
+        valid = probability ~ /^([0-9]+([.][0-9]*)?|[.][0-9]+)$/
+        exit !(valid && probability >= 0 && probability <= 1)
+    }'; then
+        printf 'CROSSOVER_PROBABILITY must be between 0 and 1.\n' >&2
+        return 2
+    fi
+    if ((POPULATION_SIZE < 2)) && awk -v probability="$CROSSOVER_PROBABILITY" 'BEGIN { exit !(probability > 0) }'; then
+        printf 'CROSSOVER_PROBABILITY greater than 0 requires POPULATION_SIZE at least 2.\n' >&2
+        return 2
+    fi
+    if [[ "$CROSSOVER_TYPE" != "component" ]]; then
+        printf 'CROSSOVER_TYPE must be component.\n' >&2
+        return 2
+    fi
+    if [[ "$SEQUENTIAL_MODE" != "none" && "$POPULATION_SIZE" != "1" ]]; then
+        printf 'Persistent populations and crossover require SEQUENTIAL_MODE=none.\n' >&2
+        return 2
+    fi
+    if [[ "$SEQUENTIAL_MODE" != "none" ]] && awk -v probability="$CROSSOVER_PROBABILITY" 'BEGIN { exit !(probability > 0) }'; then
+        printf 'Persistent populations and crossover require SEQUENTIAL_MODE=none.\n' >&2
+        return 2
+    fi
     if [[ "$ACTIVE_QUANT_BUDGET" == "1" && "$GROUP_RULE" != "size" ]]; then
         printf 'ACTIVE_QUANT_BUDGET=1 requires GROUP_RULE=size.\n' >&2
         return 2
@@ -481,6 +521,9 @@ START_TIME="$(date +%s)"
     printf 'coarse_to_fine_mutation=%s\n' "$COARSE_TO_FINE_MUTATION"
     printf 'coarse_to_fine_start_strength=%s\n' "$COARSE_TO_FINE_START_STRENGTH"
     printf 'coarse_to_fine_end_strength=%s\n' "$COARSE_TO_FINE_END_STRENGTH"
+    printf 'population_size=%s\n' "$POPULATION_SIZE"
+    printf 'crossover_probability=%s\n' "$CROSSOVER_PROBABILITY"
+    printf 'crossover_type=%s\n' "$CROSSOVER_TYPE"
     printf 'sequential_mode=%s\n' "$SEQUENTIAL_MODE"
     printf 'stage1_run_dir=%s\n' "$STAGE1_RUN_DIR"
     printf 'stage1_candidate=%s\n' "$STAGE1_CANDIDATE"
@@ -553,7 +596,7 @@ if [[ "$JOINT_AWARE_MUTATION" == "1" ]]; then
 fi
 
 STATUS=completed
-NOTES="last_successful_step=final_evaluation; quant_weights_path=${QUANT_WEIGHTS_PATH}; drop_sparsity=${DROP_SPARSITY}; target_bitwidth=${TARGET_BITWIDTH}; active_quant_budget=${ACTIVE_QUANT_BUDGET}; sequential_mode=${SEQUENTIAL_MODE}; stage1_run_dir=${STAGE1_RUN_DIR}; stage1_candidate=${STAGE1_CANDIDATE}; joint_mutation_mode=${JOINT_MUTATION_MODE}; joint_aware_mutation=${JOINT_AWARE_MUTATION}; joint_aware_probability=${EFFECTIVE_JOINT_AWARE_PROBABILITY}; adaptive_mutation=${ADAPTIVE_MUTATION}; adaptive_mutation_patience=${ADAPTIVE_MUTATION_PATIENCE}; adaptive_mutation_max_strength=${ADAPTIVE_MUTATION_MAX_STRENGTH}; coarse_to_fine_mutation=${COARSE_TO_FINE_MUTATION}; coarse_to_fine_start_strength=${COARSE_TO_FINE_START_STRENGTH}; coarse_to_fine_end_strength=${COARSE_TO_FINE_END_STRENGTH}; actual_average_bitwidth=${FINAL_QUANT_BIT_AVERAGE}; dropped_attn_modules=${DROPPED_ATTN_MODULES}; dropped_mlp_modules=${DROPPED_MLP_MODULES}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
+NOTES="last_successful_step=final_evaluation; quant_weights_path=${QUANT_WEIGHTS_PATH}; drop_sparsity=${DROP_SPARSITY}; target_bitwidth=${TARGET_BITWIDTH}; active_quant_budget=${ACTIVE_QUANT_BUDGET}; sequential_mode=${SEQUENTIAL_MODE}; stage1_run_dir=${STAGE1_RUN_DIR}; stage1_candidate=${STAGE1_CANDIDATE}; joint_mutation_mode=${JOINT_MUTATION_MODE}; joint_aware_mutation=${JOINT_AWARE_MUTATION}; joint_aware_probability=${EFFECTIVE_JOINT_AWARE_PROBABILITY}; adaptive_mutation=${ADAPTIVE_MUTATION}; adaptive_mutation_patience=${ADAPTIVE_MUTATION_PATIENCE}; adaptive_mutation_max_strength=${ADAPTIVE_MUTATION_MAX_STRENGTH}; coarse_to_fine_mutation=${COARSE_TO_FINE_MUTATION}; coarse_to_fine_start_strength=${COARSE_TO_FINE_START_STRENGTH}; coarse_to_fine_end_strength=${COARSE_TO_FINE_END_STRENGTH}; population_size=${POPULATION_SIZE}; crossover_probability=${CROSSOVER_PROBABILITY}; crossover_type=${CROSSOVER_TYPE}; actual_average_bitwidth=${FINAL_QUANT_BIT_AVERAGE}; dropped_attn_modules=${DROPPED_ATTN_MODULES}; dropped_mlp_modules=${DROPPED_MLP_MODULES}; max_cpu_memory_gb=${MAX_CPU_MEMORY_GB}; max_gpu_memory_gb=${MAX_GPU_MEMORY_GB}"
 FINAL_EXIT_CODE=0
 
 if [[ "$RUN_EXIT_CODE" != "0" ]]; then
