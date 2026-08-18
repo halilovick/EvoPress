@@ -6,3 +6,5 @@ transformers
 wandb
 accelerate
 sentencepiece
+# Required by the paper-matched Mistral configuration (flash_attention_2).
+flash-attn==2.8.3
