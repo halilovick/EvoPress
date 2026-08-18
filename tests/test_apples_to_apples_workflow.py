@@ -35,6 +35,16 @@ AGGREGATOR = REPO_ROOT / "scripts" / "aggregate_apples_to_apples.py"
 
 
 class ApplesToApplesWorkflowTest(unittest.TestCase):
+    def test_requirements_use_prebuilt_datalab_flash_attention_wheel(self) -> None:
+        requirements = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+        self.assertNotIn("\nflash-attn==2.8.3\n", requirements)
+        self.assertIn(
+            "flash_attn-2.8.3%2Bcu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl",
+            requirements,
+        )
+        self.assertIn('python_version == "3.11"', requirements)
+        self.assertIn('sys_platform == "linux"', requirements)
+
     def test_one_process_uses_same_configured_calibration_prefix(self) -> None:
         total_sequences = 1027
         configured_processes = 8

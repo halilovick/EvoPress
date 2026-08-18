@@ -6,5 +6,6 @@ transformers
 wandb
 accelerate
 sentencepiece
-# Required by the paper-matched Mistral configuration (flash_attention_2).
-flash-attn==2.8.3
+# DataLab wheel for Python 3.11, PyTorch 2.8, CUDA 12, and CXX11 ABI=True.
+# The PyPI source archive requires nvcc, which the runtime image does not provide.
+flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3%2Bcu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl ; python_version == "3.11" and sys_platform == "linux" and platform_machine == "x86_64"

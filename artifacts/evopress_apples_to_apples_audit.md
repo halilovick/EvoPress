@@ -175,6 +175,7 @@ Each generation CSV records accepted offspring, proposal attempts, candidates/to
 - `quant.py`: effective seeding, configured-shard emulation for explicit smaller process counts, and a provenance manifest recording database representation, tokenizer/model revisions, configured/effective process counts, calibration loaded/used counts, software versions, parameter counts, levels, scope, runtime, and git commit.
 - `configs/apples_to_apples/mistral7b_v03_paper_matched.json`: full paper-schedule profile.
 - `configs/apples_to_apples/mistral7b_v03_compute_matched.json`: smaller equal-compute profile.
+- `requirements.txt`: explicit prebuilt FlashAttention 2.8.3 wheel for the audited DataLab Python 3.11/PyTorch 2.8/CUDA 12/CXX11-ABI environment; this avoids an unavailable local CUDA-toolkit build.
 - `scripts/run_apples_to_apples.py`: non-overwriting database/evaluation/search launcher with strict preflight checks and resolved configuration/runtime artifacts.
 - `scripts/aggregate_apples_to_apples.py`: strict equal-budget aggregation, mean/std table, and paired `joint - quant_only` seed differences.
 - `tests/test_compression_budget.py`: exact cost and repair tests, including the Mistral architecture constants.
@@ -188,12 +189,12 @@ Executed without a full model download or GPU experiment:
 
 - `python -m pytest -q tests/test_compression_budget.py tests/test_apples_to_apples_workflow.py tests/test_run_reporting.py tests/test_eval_ppl_compression_loading.py --disable-warnings`: passed.
 - Component-crossover, joint-aware, and sequential-search tests: passed.
-- Complete suite with an isolated result root and optional launcher dependency probes disabled: 160 passed.
+- Complete suite with an isolated result root and optional launcher dependency probes disabled: 161 passed.
 - `python -m py_compile` on every changed Python entry point: passed.
 - `git diff --check`: passed.
 - Paper and compute profile dry runs: passed; commands contain the intended full scope, exact target assertions, schedules, and slow-tokenizer behavior.
 
-The first unisolated full-suite attempt reached 95 passes and failed one launcher dry-run test because existing repository result directories were detected as completed. The original isolated implementation suite passed 156 tests; after adding the explicit one-GPU database path and provenance checks, the latest isolated suite passes all 160 tests. Four launcher tests also fail in this local environment when optional dependency probes are enabled because `datasets`, `accelerate`, and `sentencepiece` are not installed; the algorithm tests and dry runs do not require those packages.
+The first unisolated full-suite attempt reached 95 passes and failed one launcher dry-run test because existing repository result directories were detected as completed. The original isolated implementation suite passed 156 tests; after adding the explicit one-GPU database path, provenance checks, and prebuilt-wheel regression check, the latest isolated suite passes all 161 tests. Four launcher tests also fail in this local environment when optional dependency probes are enabled because `datasets`, `accelerate`, and `sentencepiece` are not installed; the algorithm tests and dry runs do not require those packages.
 
 No multi-hour Mistral search, GPTQ generation, or perplexity evaluation was run during implementation.
 
