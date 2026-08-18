@@ -13,6 +13,14 @@ from tqdm import trange
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.common_utils import fix_seed
+from src.compression_budget import (
+    CompressionBudgetError,
+    candidate_compression_cost,
+    inspect_quantization_database,
+    repair_quant_state_to_budget,
+    uniform_quantization_target_cost,
+    validate_exact_budget,
+)
 from src.data_utils import get_data
 from src.metrics import compute_kl_div, compute_perplexity
 from src.model_utils import (
@@ -932,6 +940,34 @@ def parse_args(argv=None):
     parser.add_argument("--group_rule", default="none", choices=["size", "name", "none"])
     parser.add_argument("--step_size", default=1, type=int)
     parser.add_argument(
+        "--compression_budget_mode",
+        default="legacy_active_average",
+        choices=["legacy_active_average", "match_uniform_quantization_total"],
+        help=(
+            "Budget convention. The legacy mode preserves prior experiments. "
+            "match_uniform_quantization_total derives one exact total-model cost "
+            "from the no-depth uniform target and enforces it for every candidate."
+        ),
+    )
+    parser.add_argument(
+        "--quantization_group_size",
+        default=None,
+        type=int,
+        help="GPTQ group size used for exact metadata/storage accounting.",
+    )
+    parser.add_argument(
+        "--budget_include_quantization_metadata",
+        action="store_true",
+        help="Include GPTQ group scales and zero-points in the exact total cost.",
+    )
+    parser.add_argument("--budget_scale_bits", default=16, type=int)
+    parser.add_argument("--budget_zero_point_bits", default=16, type=int)
+    parser.add_argument("--budget_dense_dtype_bits", default=16, type=int)
+    parser.add_argument("--expected_dense_model_bits", default=None, type=int)
+    parser.add_argument("--expected_target_cost_bits", default=None, type=int)
+    parser.add_argument("--expected_bitwidths", nargs="+", type=int, default=None)
+    parser.add_argument("--expected_quantized_modules", type=int, default=None)
+    parser.add_argument(
         "--active_quant_budget",
         action="store_true",
         help="Keep the target bit average over projections still active after depth pruning.",
@@ -1010,6 +1046,14 @@ def parse_args(argv=None):
     parser.add_argument("--offspring", required=True, type=int)
     parser.add_argument("--initially_generated", required=True, type=int)
     parser.add_argument("--initial_tokens", required=True, type=int)
+    parser.add_argument(
+        "--skip_initial_single_candidate_evaluation",
+        action="store_true",
+        help=(
+            "Start from one unevaluated parent, matching original EvoPress's "
+            "integer-target initialization. Requires population and initial size 1."
+        ),
+    )
     parser.add_argument("--survivors_per_selection", nargs="+", required=True, type=int)
     parser.add_argument("--tokens_per_selection", nargs="+", required=True, type=int)
     parser.add_argument(
@@ -1120,8 +1164,52 @@ def validate_joint_search_args(args):
         )
     if args.survivors_per_selection[-1] != 1:
         raise ValueError("The final selection stage must have one survivor.")
+    if args.skip_initial_single_candidate_evaluation and (
+        args.initially_generated != 1
+        or args.population_size != 1
+        or args.sequential_mode != "none"
+    ):
+        raise ValueError(
+            "--skip_initial_single_candidate_evaluation requires initially_generated=1, "
+            "population_size=1, and sequential_mode=none."
+        )
     if args.active_quant_budget and args.group_rule != "size":
         raise ValueError("--active_quant_budget requires --group_rule size.")
+    exact_total_budget = (
+        args.compression_budget_mode == "match_uniform_quantization_total"
+    )
+    if exact_total_budget and args.group_rule != "size":
+        raise ValueError(
+            "--compression_budget_mode match_uniform_quantization_total requires "
+            "--group_rule size to retain paper-compatible level exchanges."
+        )
+    if exact_total_budget and args.active_quant_budget:
+        raise ValueError(
+            "The exact total-model budget replaces --active_quant_budget; do not "
+            "enable both conventions."
+        )
+    if exact_total_budget and int(args.target_bitwidth) != args.target_bitwidth:
+        raise ValueError(
+            "The uniform reference target must be an available integral bit-width."
+        )
+    if exact_total_budget and args.budget_include_quantization_metadata:
+        if args.quantization_group_size is None:
+            raise ValueError(
+                "--quantization_group_size is required when metadata is included."
+            )
+    if exact_total_budget and args.joint_mutation_mode != "standard":
+        raise ValueError(
+            "The first apples-to-apples experiment intentionally uses standard "
+            "joint mutation; interaction-aware mutation must be a separate ablation."
+        )
+    if exact_total_budget and args.joint_aware_mutation:
+        raise ValueError(
+            "Joint-aware mutation must be evaluated as a separate exact-budget ablation."
+        )
+    if exact_total_budget and args.sequential_mode != "none":
+        raise ValueError(
+            "Sequential initialization is outside the first exact-budget comparison."
+        )
     if args.joint_mutation_mode == "interaction_aware" and not args.active_quant_budget:
         raise ValueError("--joint_mutation_mode interaction_aware requires --active_quant_budget.")
     if args.joint_mutation_mode == "interaction_aware" and args.joint_aware_mutation:
@@ -1266,6 +1354,17 @@ def main():
     layer_names = sorted(layer_names, key=layer_order_fn)
     grouped_layer_names = group_layers(model, layer_names, args.group_rule)
 
+    if args.expected_quantized_modules is not None and len(layer_names) != args.expected_quantized_modules:
+        raise ValueError(
+            "Quantization database module-count mismatch: "
+            f"expected={args.expected_quantized_modules}, actual={len(layer_names)}."
+        )
+    database_audit = inspect_quantization_database(
+        args.quant_weights_path,
+        expected_module_names=layer_names,
+        expected_bitwidths=args.expected_bitwidths,
+    )
+
     print("Quant groups:")
     for group in grouped_layer_names:
         print(group)
@@ -1273,6 +1372,56 @@ def main():
     model.state = [[None] * len(names) for names in grouped_layer_names]
 
     full_quantizable_weights = quantizable_weights(model, grouped_layer_names)
+    exact_total_budget = (
+        args.compression_budget_mode == "match_uniform_quantization_total"
+    )
+    budget_cost_kwargs = {
+        "attention_module_names": attention_module_names,
+        "mlp_module_names": mlp_module_names,
+        "dense_dtype_bits": args.budget_dense_dtype_bits,
+        "group_size": args.quantization_group_size,
+        "include_quantization_metadata": args.budget_include_quantization_metadata,
+        "scale_bits": args.budget_scale_bits,
+        "zero_point_bits": args.budget_zero_point_bits,
+    }
+    uniform_reference_cost = None
+    target_cost_bits = None
+    if exact_total_budget:
+        uniform_reference_cost = uniform_quantization_target_cost(
+            model,
+            grouped_layer_names,
+            int(args.target_bitwidth),
+            **budget_cost_kwargs,
+        )
+        target_cost_bits = int(uniform_reference_cost["total_cost_bits"])
+        if (
+            args.expected_dense_model_bits is not None
+            and uniform_reference_cost["dense_model_bits"]
+            != args.expected_dense_model_bits
+        ):
+            raise ValueError(
+                "Live model dense cost does not match the configured reference: "
+                f"expected={args.expected_dense_model_bits}, "
+                f"actual={uniform_reference_cost['dense_model_bits']}."
+            )
+        if (
+            args.expected_target_cost_bits is not None
+            and target_cost_bits != args.expected_target_cost_bits
+        ):
+            raise ValueError(
+                "Live model uniform target does not match the configured reference: "
+                f"expected={args.expected_target_cost_bits}, "
+                f"actual={target_cost_bits}."
+            )
+        print(f"Exact common compression target: {target_cost_bits} bits")
+        print(
+            "Exact common compression target size: "
+            f"{uniform_reference_cost['total_cost_mib']:.6f} MiB"
+        )
+        print(
+            "Exact common compression ratio: "
+            f"{uniform_reference_cost['compression_ratio']:.12f}x"
+        )
     print(f"Quant budget scope: {'active' if args.active_quant_budget else 'all'}")
     print(f"Joint mutation mode: {args.joint_mutation_mode}")
     print(f"Sequential mode: {args.sequential_mode}")
@@ -1339,6 +1488,18 @@ def main():
                     candidate["drop"],
                     args.target_bitwidth,
                     args.step_size,
+                )
+            if exact_total_budget:
+                candidate["quant"] = repair_quant_state_to_budget(
+                    model,
+                    grouped_layer_names,
+                    args.quant_weights_path,
+                    candidate["quant"],
+                    candidate["drop"],
+                    target_cost_bits,
+                    preserve_equal_size_group_costs=True,
+                    uniform_reference_bitwidth=int(args.target_bitwidth),
+                    **budget_cost_kwargs,
                 )
 
             if candidate in initial_candidates:
@@ -1463,6 +1624,18 @@ def main():
                 candidate["drop"],
                 args.target_bitwidth,
             )
+        if exact_total_budget:
+            initial_cost = candidate_compression_cost(
+                model,
+                candidate,
+                grouped_layer_names=grouped_layer_names,
+                **budget_cost_kwargs,
+            )
+            validate_exact_budget(
+                initial_cost,
+                target_cost_bits,
+                context="initial joint candidate",
+            )
         if args.sequential_mode == "depth_to_quant_frozen":
             validate_frozen_component(candidate, stage1_import.component, "depth")
         if args.sequential_mode in QUANT_FIRST_MODES and (
@@ -1474,18 +1647,26 @@ def main():
                 "quantization",
             )
 
-    population, train_fitnesses = selection(
-        model=model,
-        layers=layers,
-        grouped_layer_names=grouped_layer_names,
-        quant_weights_path=args.quant_weights_path,
-        candidates=initial_candidates,
-        num_survive=args.population_size,
-        calibration_data=calibration_data,
-        num_tokens=args.initial_tokens,
-        fitness_fn=args.fitness_fn,
-        target_logits=target_logits,
-    )
+    if args.skip_initial_single_candidate_evaluation:
+        initial_candidate_evaluations = 0
+        initial_evaluation_tokens = 0
+        population = copy.deepcopy(initial_candidates)
+        train_fitnesses = [float("inf")]
+    else:
+        initial_candidate_evaluations = len(initial_candidates)
+        initial_evaluation_tokens = initial_candidate_evaluations * args.initial_tokens
+        population, train_fitnesses = selection(
+            model=model,
+            layers=layers,
+            grouped_layer_names=grouped_layer_names,
+            quant_weights_path=args.quant_weights_path,
+            candidates=initial_candidates,
+            num_survive=args.population_size,
+            calibration_data=calibration_data,
+            num_tokens=args.initial_tokens,
+            fitness_fn=args.fitness_fn,
+            target_logits=target_logits,
+        )
     validate_persistent_population(
         population,
         args.population_size,
@@ -1530,6 +1711,9 @@ def main():
     crossover_offspring_accepted_total = 0
     crossover_repair_changed_gene_count_total = 0
     mutation_offspring_accepted_total = 0
+    offspring_attempts_total = 0
+    candidate_evaluations_search_cumulative = initial_candidate_evaluations
+    evaluation_tokens_search_cumulative = initial_evaluation_tokens
     for generation in range(args.generations):
         generation_population = copy.deepcopy(population)
         generation_parent = copy.deepcopy(parent)
@@ -1810,6 +1994,36 @@ def main():
                     no_op_mutations += 1
                     continue
 
+            if exact_total_budget:
+                try:
+                    offspring["quant"] = repair_quant_state_to_budget(
+                        model,
+                        grouped_layer_names,
+                        args.quant_weights_path,
+                        offspring["quant"],
+                        offspring["drop"],
+                        target_cost_bits,
+                        preserve_equal_size_group_costs=True,
+                        uniform_reference_bitwidth=int(args.target_bitwidth),
+                        **budget_cost_kwargs,
+                    )
+                    offspring_cost = candidate_compression_cost(
+                        model,
+                        offspring,
+                        grouped_layer_names=grouped_layer_names,
+                        **budget_cost_kwargs,
+                    )
+                    validate_exact_budget(
+                        offspring_cost,
+                        target_cost_bits,
+                        context="joint offspring",
+                    )
+                except CompressionBudgetError:
+                    infeasible_candidates += 1
+                    if use_component_crossover:
+                        crossover_infeasible_candidates += 1
+                    continue
+
             if candidate_is_duplicate(offspring, population, offspring_list):
                 duplicate_candidates += 1
                 if use_component_crossover:
@@ -1844,6 +2058,8 @@ def main():
                     "fallback_quant_exchanges_used"
                 ] += int(interaction_details["fallback_quant_exchange_used"])
 
+        stage_candidate_evaluations = []
+        stage_evaluation_tokens = []
         for selection_stage, (num_survive, num_tokens) in enumerate(
             zip(effective_selection_survivors, args.tokens_per_selection)
         ):
@@ -1877,6 +2093,8 @@ def main():
 
             candidate_pool = offspring_list
             mutation_type_pool = offspring_mutation_types
+            stage_candidate_evaluations.append(len(candidate_pool))
+            stage_evaluation_tokens.append(len(candidate_pool) * num_tokens)
             offspring_list, train_fitnesses = selection(
                 model=model,
                 layers=layers,
@@ -1929,6 +2147,9 @@ def main():
                     context=f"generation {generation + 1} final selection",
                 )
 
+        offspring_attempts_total += offspring_attempts
+        candidate_evaluations_search_cumulative += sum(stage_candidate_evaluations)
+        evaluation_tokens_search_cumulative += sum(stage_evaluation_tokens)
         population = offspring_list
         parent = population[0]
         train_fitness = train_fitnesses[0]
@@ -1952,7 +2173,18 @@ def main():
             model,
             generation_depth_details,
             generation_bitwidths,
+            quantization_group_size=(
+                args.quantization_group_size if exact_total_budget else None
+            ),
+            include_quantization_metadata=(
+                args.budget_include_quantization_metadata if exact_total_budget else False
+            ),
+            scale_bits=args.budget_scale_bits,
+            zero_point_bits=args.budget_zero_point_bits,
         )
+        generation_cost_bits = generation_compression["model_size_statistics"][
+            "compression_cost_bits"
+        ]
         survivors = list(args.survivors_per_selection)
         if args.sequential_mode == "depth_to_quant_frozen":
             mutation_summary_type = "sequential_quantization_only"
@@ -1968,9 +2200,14 @@ def main():
         reporter.append_generation(
             {
                 "generation": generation + 1,
-                "best_search_fitness": generation_train_fitness,
+                "best_search_fitness": train_fitness,
                 "fitness_fn": args.fitness_fn,
-                "best_calibration_kl": None,
+                "best_calibration_kl": (
+                    train_fitness if args.fitness_fn == "kl" else None
+                ),
+                "parent_search_fitness_before_generation": (
+                    generation_train_fitness
+                ),
                 "best_train_ppl": ppl_train,
                 "wikitext2_ppl": generation_eval_metrics.get("wikitext2"),
                 "c4_ppl": generation_eval_metrics.get("c4"),
@@ -1998,6 +2235,13 @@ def main():
                 "estimated_weight_memory_mb": generation_compression["model_size_statistics"][
                     "estimated_weight_memory_mb"
                 ],
+                "compression_cost_bits": generation_cost_bits,
+                "compression_target_bits": target_cost_bits,
+                "compression_difference_bits": (
+                    generation_cost_bits - target_cost_bits
+                    if target_cost_bits is not None
+                    else None
+                ),
                 "dropped_attention_count": generation_depth_details[
                     "dropped_attention_count"
                 ],
@@ -2088,6 +2332,43 @@ def main():
                     selected_parent_mutation_type
                 ),
                 "accepted_parent_replacement": accepted_parent_replacement,
+                "offspring_attempts": offspring_attempts,
+                "candidate_evaluations_stage_1": (
+                    stage_candidate_evaluations[0]
+                    if len(stage_candidate_evaluations) > 0
+                    else None
+                ),
+                "candidate_evaluations_stage_2": (
+                    stage_candidate_evaluations[1]
+                    if len(stage_candidate_evaluations) > 1
+                    else None
+                ),
+                "candidate_evaluations_stage_3": (
+                    stage_candidate_evaluations[2]
+                    if len(stage_candidate_evaluations) > 2
+                    else None
+                ),
+                "evaluation_tokens_stage_1": (
+                    stage_evaluation_tokens[0]
+                    if len(stage_evaluation_tokens) > 0
+                    else None
+                ),
+                "evaluation_tokens_stage_2": (
+                    stage_evaluation_tokens[1]
+                    if len(stage_evaluation_tokens) > 1
+                    else None
+                ),
+                "evaluation_tokens_stage_3": (
+                    stage_evaluation_tokens[2]
+                    if len(stage_evaluation_tokens) > 2
+                    else None
+                ),
+                "candidate_evaluations_search_cumulative": (
+                    candidate_evaluations_search_cumulative
+                ),
+                "evaluation_tokens_search_cumulative": (
+                    evaluation_tokens_search_cumulative
+                ),
                 "runtime_seconds_cumulative": reporter.runtime_seconds(),
                 "peak_gpu_memory_mb": peak_gpu_memory()[0],
             }
@@ -2106,6 +2387,20 @@ def main():
             parent["quant"],
             parent["drop"],
             args.target_bitwidth,
+        )
+    final_exact_budget_valid = None
+    final_exact_cost = None
+    if exact_total_budget:
+        final_exact_cost = candidate_compression_cost(
+            model,
+            parent,
+            grouped_layer_names=grouped_layer_names,
+            **budget_cost_kwargs,
+        )
+        final_exact_budget_valid = validate_exact_budget(
+            final_exact_cost,
+            target_cost_bits,
+            context="final joint candidate",
         )
     if args.sequential_mode == "depth_to_quant_frozen":
         validate_frozen_component(parent, stage1_import.component, "depth")
@@ -2188,6 +2483,17 @@ def main():
         model,
         final_depth_details,
         final_bitwidths,
+        quantization_group_size=(
+            args.quantization_group_size if exact_total_budget else None
+        ),
+        include_quantization_metadata=(
+            args.budget_include_quantization_metadata if exact_total_budget else False
+        ),
+        scale_bits=args.budget_scale_bits,
+        zero_point_bits=args.budget_zero_point_bits,
+        dense_dtype_bits=(
+            args.budget_dense_dtype_bits if exact_total_budget else None
+        ),
     )
     final_candidate = build_final_candidate(
         "joint_depth_quant",
@@ -2238,6 +2544,9 @@ def main():
             "offspring": args.offspring,
             "initial_candidates": args.initially_generated,
             "initial_tokens": args.initial_tokens,
+            "skip_initial_single_candidate_evaluation": (
+                args.skip_initial_single_candidate_evaluation
+            ),
             "selection_tokens": list(args.tokens_per_selection),
             "selection_survivors": list(args.survivors_per_selection),
             "fitness_fn": args.fitness_fn,
@@ -2264,6 +2573,14 @@ def main():
             "effective_final_survivor_count": (
                 effective_selection_survivors[-1]
             ),
+            "initial_candidate_evaluations": initial_candidate_evaluations,
+            "initial_evaluation_tokens": initial_evaluation_tokens,
+            "offspring_attempts_total": offspring_attempts_total,
+            "offspring_generated_total": args.generations * args.offspring,
+            "candidate_evaluations_search_total": (
+                candidate_evaluations_search_cumulative
+            ),
+            "evaluation_tokens_search_total": evaluation_tokens_search_cumulative,
         },
         compression_config={
             "target_depth_sparsity": args.drop_sparsity,
@@ -2271,6 +2588,39 @@ def main():
             "bits_available": available_bitwidths(args.quant_weights_path),
             "group_size": None,
             "group_rule": args.group_rule,
+            "compression_budget_mode": args.compression_budget_mode,
+            "preserve_equal_size_group_costs": exact_total_budget,
+            "target_cost_bits": target_cost_bits,
+            "expected_dense_model_bits": args.expected_dense_model_bits,
+            "expected_target_cost_bits": args.expected_target_cost_bits,
+            "target_cost_bytes": (
+                uniform_reference_cost["total_cost_bytes"]
+                if uniform_reference_cost is not None
+                else None
+            ),
+            "target_cost_mib": (
+                uniform_reference_cost["total_cost_mib"]
+                if uniform_reference_cost is not None
+                else None
+            ),
+            "target_compression_ratio": (
+                uniform_reference_cost["compression_ratio"]
+                if uniform_reference_cost is not None
+                else None
+            ),
+            "target_paper_weight_only_cost_bits": (
+                uniform_reference_cost["fixed_precision_bits"]
+                + uniform_reference_cost["quantized_weight_bits"]
+                if uniform_reference_cost is not None
+                else None
+            ),
+            "quantization_group_size": args.quantization_group_size,
+            "include_quantization_metadata": (
+                args.budget_include_quantization_metadata
+            ),
+            "scale_bits": args.budget_scale_bits,
+            "zero_point_bits": args.budget_zero_point_bits,
+            "database_module_count": database_audit["module_count"],
             "active_quant_budget": args.active_quant_budget,
             "joint_mutation_mode": args.joint_mutation_mode,
             "joint_aware_mutation": args.joint_aware_mutation,
@@ -2301,6 +2651,27 @@ def main():
             "c4_ppl": final_eval_metrics.get("c4"),
             "fineweb_ppl": final_eval_metrics.get("fineweb_edu"),
             "train_ppl": ppl_train,
+            "compression_target_bits": target_cost_bits,
+            "compression_realized_bits": final_compression[
+                "model_size_statistics"
+            ]["compression_cost_bits"],
+            "compression_difference_bits": (
+                final_compression["model_size_statistics"]["compression_cost_bits"]
+                - target_cost_bits
+                if target_cost_bits is not None
+                else None
+            ),
+            "compression_difference_percent": (
+                100.0
+                * (
+                    final_compression["model_size_statistics"]["compression_cost_bits"]
+                    - target_cost_bits
+                )
+                / target_cost_bits
+                if target_cost_bits is not None
+                else None
+            ),
+            "exact_budget_valid": final_exact_budget_valid,
         },
         parameter_statistics=final_compression["parameter_statistics"],
         depth_statistics={

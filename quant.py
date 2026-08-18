@@ -29,8 +29,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import wandb
 
 from src import dist_utils
+from src.common_utils import fix_seed
 from src.data_utils import get_data
 from src.quantizer import Quantizer
+from src.run_reporting import get_git_commit, utc_now, write_json
 
 
 def parse_args():
@@ -156,6 +158,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    fix_seed(args.seed)
     # Distributed init
     if dist.is_available():
         dist.init_process_group(backend="nccl", init_method="env://")
@@ -176,6 +179,8 @@ def main():
         low_cpu_mem_usage=args.low_cpu_mem_usage,
         attn_implementation=args.attn_implementation,
     )
+    dense_parameter_count = sum(parameter.numel() for parameter in model.parameters())
+    model_revision = getattr(model.config, "_commit_hash", None)
     print(model)
     if not args.cpu_offload_modules:
         model = model.to(device)
@@ -228,6 +233,36 @@ def main():
     # Prepare save dir
     if dist_utils.is_main():
         os.makedirs(args.save_dir, exist_ok=True)
+        manifest_path = os.path.join(args.save_dir, "quant_database_manifest.json")
+        write_json(
+            manifest_path,
+            {
+                "schema_version": 1,
+                "status": "generating",
+                "timestamp_start": utc_now(),
+                "git_commit": get_git_commit(os.path.dirname(os.path.abspath(__file__))),
+                "model_name": args.model_name_or_path,
+                "model_revision": model_revision,
+                "total_parameters_dense": dense_parameter_count,
+                "attention_implementation": args.attn_implementation,
+                "quantizable_modules_regex": args.quantizable_modules,
+                "bitwidth_options": sorted(args.bitwidth_options),
+                "calibration_bitwidth": args.calibration_bitwidth,
+                "group_size": args.group_size,
+                "perchannel": args.perchannel,
+                "symmetric": args.sym,
+                "activation_order": args.act_order,
+                "relative_dampening": args.rel_damp,
+                "block_size": args.block_size,
+                "calibration_data": args.calibration_data,
+                "calibration_tokens": args.calibration_tokens,
+                "calibration_sequence_length": args.calibration_sequence_length,
+                "seed": args.seed,
+                "database_representation": (
+                    "dequantized floating-point reconstruction tensors; not packed storage"
+                ),
+            },
+        )
 
     dist.barrier()
 
@@ -235,6 +270,60 @@ def main():
     quantizer.quantize(args.bitwidth_options, args.calibration_bitwidth)
     t2 = time.perf_counter()
     dist_utils.print_on_main(f"Quantization took {(t2 - t1)} s.")
+    if dist_utils.is_main():
+        module_names = sorted(
+            name
+            for name in os.listdir(args.save_dir)
+            if os.path.isdir(os.path.join(args.save_dir, name))
+        )
+        levels_by_module = {
+            name: sorted(
+                int(filename[:-4])
+                for filename in os.listdir(os.path.join(args.save_dir, name))
+                if filename.endswith(".pth") and filename[:-4].isdigit()
+            )
+            for name in module_names
+        }
+        quantized_weight_parameters = sum(
+            int(model.get_submodule(name).in_features)
+            * int(model.get_submodule(name).out_features)
+            for name in module_names
+        )
+        write_json(
+            os.path.join(args.save_dir, "quant_database_manifest.json"),
+            {
+                "schema_version": 1,
+                "status": "complete",
+                "timestamp_end": utc_now(),
+                "git_commit": get_git_commit(os.path.dirname(os.path.abspath(__file__))),
+                "model_name": args.model_name_or_path,
+                "model_revision": model_revision,
+                "total_parameters_dense": dense_parameter_count,
+                "attention_implementation": args.attn_implementation,
+                "quantized_weight_parameters": quantized_weight_parameters,
+                "fixed_parameters": dense_parameter_count - quantized_weight_parameters,
+                "quantizable_modules_regex": args.quantizable_modules,
+                "bitwidth_options": sorted(args.bitwidth_options),
+                "calibration_bitwidth": args.calibration_bitwidth,
+                "group_size": args.group_size,
+                "perchannel": args.perchannel,
+                "symmetric": args.sym,
+                "activation_order": args.act_order,
+                "relative_dampening": args.rel_damp,
+                "block_size": args.block_size,
+                "calibration_data": args.calibration_data,
+                "calibration_tokens": args.calibration_tokens,
+                "calibration_sequence_length": args.calibration_sequence_length,
+                "seed": args.seed,
+                "module_count": len(module_names),
+                "module_names": module_names,
+                "levels_by_module": levels_by_module,
+                "runtime_seconds": t2 - t1,
+                "database_representation": (
+                    "dequantized floating-point reconstruction tensors; not packed storage"
+                ),
+            },
+        )
 
 
 if __name__ == "__main__":

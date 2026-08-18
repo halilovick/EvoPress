@@ -18,10 +18,13 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import torch
 
+from src.compression_budget import candidate_compression_cost
+
 
 GENERATION_COLUMNS = [
     "generation",
     "best_search_fitness",
+    "parent_search_fitness_before_generation",
     "fitness_fn",
     "best_calibration_kl",
     "best_train_ppl",
@@ -39,11 +42,23 @@ GENERATION_COLUMNS = [
     "active_parameters",
     "average_bitwidth_active",
     "estimated_weight_memory_mb",
+    "compression_cost_bits",
+    "compression_target_bits",
+    "compression_difference_bits",
     "dropped_attention_count",
     "dropped_mlp_count",
     "mutation_summary",
     "selected_parent_mutation_type",
     "accepted_parent_replacement",
+    "offspring_attempts",
+    "candidate_evaluations_stage_1",
+    "candidate_evaluations_stage_2",
+    "candidate_evaluations_stage_3",
+    "evaluation_tokens_stage_1",
+    "evaluation_tokens_stage_2",
+    "evaluation_tokens_stage_3",
+    "candidate_evaluations_search_cumulative",
+    "evaluation_tokens_search_cumulative",
     "runtime_seconds_cumulative",
     "peak_gpu_memory_mb",
 ]
@@ -225,6 +240,10 @@ def compute_compression_metrics(
     depth_details: Mapping[str, Any],
     bitwidth_by_module: Mapping[str, int] | None = None,
     dense_dtype_bits: int | None = None,
+    quantization_group_size: int | None = None,
+    include_quantization_metadata: bool = False,
+    scale_bits: int = 16,
+    zero_point_bits: int = 16,
 ) -> dict[str, dict[str, Any]]:
     bitwidth_by_module = dict(bitwidth_by_module or {})
     dense_dtype_bits = dense_dtype_bits or infer_dense_dtype_bits(model)
@@ -312,8 +331,20 @@ def compute_compression_metrics(
         total_effective_bits / total_parameters if total_parameters else None
     )
 
-    dense_weight_memory_mb = total_parameters * dense_dtype_bits / 8 / 1024**2
-    estimated_weight_memory_mb = total_effective_bits / 8 / 1024**2
+    exact_cost = candidate_compression_cost(
+        model,
+        {
+            "bitwidth_by_module": bitwidth_by_module,
+            "dropped_modules": list(dropped_modules),
+        },
+        dense_dtype_bits=dense_dtype_bits,
+        group_size=quantization_group_size,
+        include_quantization_metadata=include_quantization_metadata,
+        scale_bits=scale_bits,
+        zero_point_bits=zero_point_bits,
+    )
+    dense_weight_memory_mb = exact_cost["dense_model_mib"]
+    estimated_weight_memory_mb = exact_cost["total_cost_mib"]
     searched_weight_memory_mb = active_searched_bits / 8 / 1024**2
     nonsearched_weight_memory_mb = (
         active_nonsearched_parameters * dense_dtype_bits / 8 / 1024**2
@@ -361,6 +392,17 @@ def compute_compression_metrics(
         "searched_weight_memory_mb": searched_weight_memory_mb,
         "nonsearched_weight_memory_mb": nonsearched_weight_memory_mb,
         "dense_dtype_bits": dense_dtype_bits,
+        "compression_cost_bits": exact_cost["total_cost_bits"],
+        "compression_cost_bytes": exact_cost["total_cost_bytes"],
+        "paper_weight_only_cost_bits": total_effective_bits,
+        "fixed_precision_bits": exact_cost["fixed_precision_bits"],
+        "quantized_weight_bits": exact_cost["quantized_weight_bits"],
+        "quantization_metadata_bits": exact_cost["quantization_metadata_bits"],
+        "quantization_group_size": quantization_group_size,
+        "include_quantization_metadata": include_quantization_metadata,
+        "scale_bits": exact_cost["scale_bits"],
+        "zero_point_bits": exact_cost["zero_point_bits"],
+        "cost_formula": exact_cost["cost_formula"],
         "model_size_note": MODEL_SIZE_NOTE,
     }
     return {
@@ -520,6 +562,10 @@ class RunReporter:
             "estimated_weight_memory_mb": model_size_statistics.get("estimated_weight_memory_mb"),
             "dense_weight_memory_mb": model_size_statistics.get("dense_weight_memory_mb"),
             "estimated_compression_ratio": model_size_statistics.get("estimated_compression_ratio"),
+            "compression_cost_bits": model_size_statistics.get("compression_cost_bits"),
+            "compression_cost_bytes": model_size_statistics.get("compression_cost_bytes"),
+            "paper_weight_only_cost_bits": model_size_statistics.get("paper_weight_only_cost_bits"),
+            "quantization_metadata_bits": model_size_statistics.get("quantization_metadata_bits"),
             "runtime_seconds": self.runtime_seconds(),
             "peak_gpu_memory_mb": peak_allocated_mb,
             "peak_gpu_reserved_mb": peak_reserved_mb,
