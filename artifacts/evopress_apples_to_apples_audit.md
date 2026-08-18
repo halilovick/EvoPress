@@ -172,13 +172,13 @@ Each generation CSV records accepted offspring, proposal attempts, candidates/to
 - `evo_quant_search.py`: opt-in exact total budgeting, live-reference validation, database scope/level checks, paper-compatible unevaluated integer initialization, exact counters, and structured cost/runtime reporting.
 - `evo_joint_search.py`: opt-in exact total budgeting and repair for every candidate, live-reference validation, paper-compute-matched single-parent initialization, and detailed evaluation/attempt/runtime counters.
 - `src/run_reporting.py`: metadata-inclusive storage breakdown and expanded generation counters/KL logging.
-- `quant.py`: effective seeding and a provenance manifest recording database representation, calibration, model revision/counts, levels, scope, runtime, and git commit.
+- `quant.py`: effective seeding, configured-shard emulation for explicit smaller process counts, and a provenance manifest recording database representation, tokenizer/model revisions, configured/effective process counts, calibration loaded/used counts, software versions, parameter counts, levels, scope, runtime, and git commit.
 - `configs/apples_to_apples/mistral7b_v03_paper_matched.json`: full paper-schedule profile.
 - `configs/apples_to_apples/mistral7b_v03_compute_matched.json`: smaller equal-compute profile.
 - `scripts/run_apples_to_apples.py`: non-overwriting database/evaluation/search launcher with strict preflight checks and resolved configuration/runtime artifacts.
 - `scripts/aggregate_apples_to_apples.py`: strict equal-budget aggregation, mean/std table, and paired `joint - quant_only` seed differences.
 - `tests/test_compression_budget.py`: exact cost and repair tests, including the Mistral architecture constants.
-- `tests/test_apples_to_apples_workflow.py`: config, command, dry-run, and aggregation tests.
+- `tests/test_apples_to_apples_workflow.py`: config, command, dry-run, one/eight-process calibration-prefix equivalence, manifest provenance, and aggregation tests.
 
 All new behavior is opt-in. Legacy CLI budget modes and previous result files remain unchanged.
 
@@ -188,12 +188,12 @@ Executed without a full model download or GPU experiment:
 
 - `python -m pytest -q tests/test_compression_budget.py tests/test_apples_to_apples_workflow.py tests/test_run_reporting.py tests/test_eval_ppl_compression_loading.py --disable-warnings`: passed.
 - Component-crossover, joint-aware, and sequential-search tests: passed.
-- Complete suite with an isolated result root and optional launcher dependency probes disabled: 156 passed.
+- Complete suite with an isolated result root and optional launcher dependency probes disabled: 160 passed.
 - `python -m py_compile` on every changed Python entry point: passed.
 - `git diff --check`: passed.
 - Paper and compute profile dry runs: passed; commands contain the intended full scope, exact target assertions, schedules, and slow-tokenizer behavior.
 
-The first unisolated full-suite attempt reached 95 passes and failed one launcher dry-run test because existing repository result directories were detected as completed. Repeating with `RESULTS_RUNS_ROOT` directed to an isolated temporary location passed all 156 tests. Four launcher tests also fail in this local environment when optional dependency probes are enabled because `datasets`, `accelerate`, and `sentencepiece` are not installed; the algorithm tests and dry runs do not require those packages.
+The first unisolated full-suite attempt reached 95 passes and failed one launcher dry-run test because existing repository result directories were detected as completed. The original isolated implementation suite passed 156 tests; after adding the explicit one-GPU database path and provenance checks, the latest isolated suite passes all 160 tests. Four launcher tests also fail in this local environment when optional dependency probes are enabled because `datasets`, `accelerate`, and `sentencepiece` are not installed; the algorithm tests and dry runs do not require those packages.
 
 No multi-hour Mistral search, GPTQ generation, or perplexity evaluation was run during implementation.
 
@@ -212,6 +212,25 @@ Generate the one shared GPTQ level database:
 ```bash
 python scripts/run_apples_to_apples.py prepare_db --config "$PAPER_CONFIG" --seed 0 --quant-db-root "$DB_ROOT" --run-id mistral7b_full_gptq_db
 ```
+
+The command above retains the upstream eight-process default. The Stage 1
+DataLab preflight on 2026-08-18 exposed one NVIDIA A40, and the one-process
+deviation was explicitly authorized. For that allocation, use:
+
+```bash
+python scripts/run_apples_to_apples.py prepare_db --config "$PAPER_CONFIG" --seed 0 --quant-db-root "$DB_ROOT" --run-id mistral7b_full_gptq_db --torchrun-processes 1
+```
+
+This override does not modify the `paper_matched` profile. Database generation
+first truncates to the same calibration-sequence prefix selected by the
+configured eight-way floor-division rule, then processes that prefix on the
+effective worker count. Thus one and eight processes consume the same examples
+and are algebraically equivalent at the Hessian level; floating-point
+accumulation and collective-reduction order can still produce small numerical
+differences. Both configured and effective counts, loaded/used calibration
+counts, and the override flag are recorded in the manifest and resolved run
+configuration. E1--E3 all reuse this one database, so this infrastructure
+deviation does not create an asymmetry between the compared methods.
 
 E0 and E1:
 
@@ -268,7 +287,7 @@ The aggregator rejects duplicate method/seed summaries, differing compressed tar
 6. The joint operator devotes proposals to two component types and uses one quantization exchange, whereas original quant-only EvoPress spends every proposal on a biased 1--3 quantization exchange. Candidate evaluations/tokens are equal, but the mutation kernels necessarily differ.
 7. FineWeb-Edu and the model ID are not pinned to immutable Hugging Face revisions in upstream EvoPress or this profile. The new database manifest records the resolved model commit when available, but exact future data replay would benefit from a pinned FineWeb snapshot/cache artifact.
 8. WikiText-2 and C4 loaders ignore the nominal `eval_tokens` argument and evaluate the complete number of 8,192-token chunks constructed by the repository. Actual loaded token counts are recorded in search summaries. This is common to both methods but should not be described as exactly 524,288 evaluation tokens.
-9. FlashAttention 2, eight GPUs for database generation, and the five-level dequantized database may be infeasible on available hardware. If so, use the provided `compute_matched` profile for both searches and label it explicitly; do not compare one paper-profile method with one reduced-profile method.
+9. The current DataLab allocation has one A40 rather than the upstream eight-process database-generation setup. Stage 1 therefore uses the explicit `--torchrun-processes 1` deviation while emulating the configured eight-way calibration prefix. This preserves the shared examples and method-to-method fairness but is not bit-for-bit identical to an eight-GPU reduction order. The deviation must remain reported when comparing against the paper. FlashAttention 2 and database storage passed the DataLab preflight.
 10. The paper result is a reference, not an acceptance threshold. Tokenizer/library/model/data revisions and hardware kernels can shift perplexity. The uniform 3-bit E1 result is the first required sanity check before interpreting E2/E3.
 
-Required full GPU workload: eight experimental runs (one dense, one uniform, three quant-only, three joint) plus one shared, expensive eight-process GPTQ database-generation job: nine GPU jobs total. Running the optional smaller three-seed search comparison adds six search jobs but reuses the same database.
+Required full GPU workload: eight experimental runs (one dense, one uniform, three quant-only, three joint) plus one shared, expensive GPTQ database-generation job: nine GPU jobs total. Upstream uses eight database-generation processes; the currently authorized Stage 1 invocation uses one physical process with the configured eight-way calibration prefix. Running the optional smaller three-seed search comparison adds six search jobs but reuses the same database.

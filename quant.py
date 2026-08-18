@@ -21,6 +21,8 @@
 
 import os
 import argparse
+import importlib.metadata
+import platform
 import time
 
 import torch
@@ -29,14 +31,32 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import wandb
 
 from src import dist_utils
+from src.calibration_utils import configured_calibration_partition
 from src.common_utils import fix_seed
 from src.data_utils import get_data
 from src.quantizer import Quantizer
 from src.run_reporting import get_git_commit, utc_now, write_json
 
 
+def installed_package_version(distribution_name):
+    try:
+        return importlib.metadata.version(distribution_name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="One-shot quantization with parallel GPTQ.")
+    parser.add_argument(
+        "--configured_torchrun_processes",
+        type=int,
+        default=None,
+        help=(
+            "Process count from the experiment profile. It defines the logical "
+            "calibration prefix and is recorded so a smaller physical-process "
+            "override remains visible in the database manifest."
+        ),
+    )
     # Model params
     parser.add_argument(
         "--model_name_or_path",
@@ -153,6 +173,11 @@ def parse_args():
     # Save params
     parser.add_argument("--save_dir", type=str, required=True, help="where to save sparse model.")
     args = parser.parse_args()
+    if (
+        args.configured_torchrun_processes is not None
+        and args.configured_torchrun_processes < 1
+    ):
+        parser.error("--configured_torchrun_processes must be at least 1.")
     return args
 
 
@@ -164,6 +189,13 @@ def main():
         dist.init_process_group(backend="nccl", init_method="env://")
     world_size = dist_utils.get_world_size()
     rank = dist_utils.get_rank()
+    visible_cuda_device_count = torch.cuda.device_count()
+    if rank >= visible_cuda_device_count:
+        raise RuntimeError(
+            f"Distributed rank {rank} cannot map to cuda:{rank}; only "
+            f"{visible_cuda_device_count} CUDA device(s) are visible."
+        )
+    configured_torchrun_processes = args.configured_torchrun_processes or world_size
     # init device
     device = f"cuda:{rank}"
     if args.dtype != "auto":
@@ -185,16 +217,69 @@ def main():
     if not args.cpu_offload_modules:
         model = model.to(device)
     # Tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name or args.model_name_or_path, use_fast=False)
+    tokenizer_name = args.tokenizer_name or args.model_name_or_path
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=False)
+    tokenizer_revision = getattr(tokenizer, "_commit_hash", None)
+    if tokenizer_revision is None and hasattr(tokenizer, "init_kwargs"):
+        tokenizer_revision = tokenizer.init_kwargs.get("_commit_hash")
     # Load calibration data
     args.calibration_sequence_length = args.calibration_sequence_length or model.config.max_position_embeddings
     calibration_data = get_data(
         args.calibration_data, args.calibration_tokens, args.calibration_sequence_length, tokenizer, train=True
     )
-    # Take slice (if running on multiple workers)
+    calibration_sequence_count_loaded = len(calibration_data)
+    calibration_token_count_loaded = sum(
+        int(input_ids.shape[-1]) for input_ids in calibration_data
+    )
+    # Preserve the configured multi-process calibration semantics even when a
+    # smaller physical world size is explicitly used. Upstream splits with
+    # floor division, so it drops the tail that cannot be divided equally among
+    # the configured workers. Truncating to that same prefix before re-sharding
+    # makes a one-process run use the same calibration examples as an eight-
+    # process run; only floating-point accumulation/reduction order can differ.
+    logical_shard_count = configured_torchrun_processes
+    calibration_sequence_count_used, partition_start, partition_end = (
+        configured_calibration_partition(
+            calibration_sequence_count_loaded,
+            logical_shard_count,
+            world_size,
+            rank,
+        )
+    )
+    calibration_data = calibration_data[:calibration_sequence_count_used]
+    calibration_token_count_used = sum(
+        int(input_ids.shape[-1]) for input_ids in calibration_data
+    )
+    sequences_per_effective_rank = calibration_sequence_count_used // world_size
+    calibration_token_counts_by_effective_rank = [
+        sum(
+            int(input_ids.shape[-1])
+            for input_ids in calibration_data[
+                effective_rank
+                * sequences_per_effective_rank : (effective_rank + 1)
+                * sequences_per_effective_rank
+            ]
+        )
+        for effective_rank in range(world_size)
+    ]
+    sequences_per_logical_shard = (
+        calibration_sequence_count_used // logical_shard_count
+    )
+    calibration_token_counts_by_logical_shard = [
+        sum(
+            int(input_ids.shape[-1])
+            for input_ids in calibration_data[
+                logical_rank
+                * sequences_per_logical_shard : (logical_rank + 1)
+                * sequences_per_logical_shard
+            ]
+        )
+        for logical_rank in range(logical_shard_count)
+    ]
+    # Take an equal slice for each effective worker.
     if dist_utils.is_dist_available_and_initialized():
-        num_seq_per_rank = len(calibration_data) // world_size
-        calibration_data = calibration_data[rank * num_seq_per_rank : (rank + 1) * num_seq_per_rank]
+        calibration_data = calibration_data[partition_start:partition_end]
+    calibration_sequence_count_per_rank = len(calibration_data)
     calibration_data = [([], {"input_ids": input_ids}) for input_ids in calibration_data]
     dist.barrier()
     # Quantizer
@@ -230,6 +315,49 @@ def main():
         drop_saved_file_cache=args.drop_saved_file_cache,
         verbose=args.verbose,
     )
+    tokenizer_provenance = {
+        "tokenizer_name": tokenizer_name,
+        "tokenizer_class": tokenizer.__class__.__name__,
+        "tokenizer_is_fast": bool(getattr(tokenizer, "is_fast", False)),
+        "tokenizer_revision": tokenizer_revision,
+    }
+    execution_provenance = {
+        "configured_torchrun_processes": configured_torchrun_processes,
+        "distributed_world_size": world_size,
+        "torchrun_process_override": configured_torchrun_processes != world_size,
+        "visible_cuda_device_count": visible_cuda_device_count,
+        "visible_cuda_device_names": [
+            torch.cuda.get_device_name(index)
+            for index in range(visible_cuda_device_count)
+        ],
+        "calibration_sequence_count_loaded": calibration_sequence_count_loaded,
+        "calibration_sequence_count_used": calibration_sequence_count_used,
+        "calibration_sequence_count_per_rank": calibration_sequence_count_per_rank,
+        "calibration_logical_shard_count": logical_shard_count,
+        "calibration_token_count_loaded": calibration_token_count_loaded,
+        "calibration_token_count_used": calibration_token_count_used,
+        "calibration_token_count_rank0": calibration_token_counts_by_effective_rank[0],
+        "calibration_token_counts_by_effective_rank": (
+            calibration_token_counts_by_effective_rank
+        ),
+        "calibration_token_counts_by_logical_shard": (
+            calibration_token_counts_by_logical_shard
+        ),
+        "calibration_dropped_sequence_count": (
+            calibration_sequence_count_loaded - calibration_sequence_count_used
+        ),
+        "calibration_dropped_token_count": (
+            calibration_token_count_loaded - calibration_token_count_used
+        ),
+        "software_versions": {
+            "python": platform.python_version(),
+            "torch": str(torch.__version__),
+            "torch_cuda": torch.version.cuda,
+            "transformers": installed_package_version("transformers"),
+            "datasets": installed_package_version("datasets"),
+            "flash_attn": installed_package_version("flash-attn"),
+        },
+    }
     # Prepare save dir
     if dist_utils.is_main():
         os.makedirs(args.save_dir, exist_ok=True)
@@ -243,6 +371,8 @@ def main():
                 "git_commit": get_git_commit(os.path.dirname(os.path.abspath(__file__))),
                 "model_name": args.model_name_or_path,
                 "model_revision": model_revision,
+                **tokenizer_provenance,
+                **execution_provenance,
                 "total_parameters_dense": dense_parameter_count,
                 "attention_implementation": args.attn_implementation,
                 "quantizable_modules_regex": args.quantizable_modules,
@@ -298,6 +428,8 @@ def main():
                 "git_commit": get_git_commit(os.path.dirname(os.path.abspath(__file__))),
                 "model_name": args.model_name_or_path,
                 "model_revision": model_revision,
+                **tokenizer_provenance,
+                **execution_provenance,
                 "total_parameters_dense": dense_parameter_count,
                 "attention_implementation": args.attn_implementation,
                 "quantized_weight_parameters": quantized_weight_parameters,

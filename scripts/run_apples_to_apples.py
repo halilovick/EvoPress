@@ -205,6 +205,8 @@ def validate_quant_database(
     expected_values = {
         "status": "complete",
         "model_name": config["model"],
+        "tokenizer_name": config["model"],
+        "tokenizer_is_fast": False,
         "attention_implementation": database["attention_implementation"],
         "bitwidth_options": expected_levels,
         "group_size": database["group_size"],
@@ -214,6 +216,9 @@ def validate_quant_database(
         "calibration_data": database["calibration_data"],
         "calibration_tokens": database["calibration_tokens"],
         "calibration_sequence_length": database["sequence_length"],
+        "calibration_token_count_loaded": database["calibration_tokens"],
+        "calibration_logical_shard_count": database["torchrun_processes"],
+        "configured_torchrun_processes": database["torchrun_processes"],
         "module_count": database["expected_modules"],
         "total_parameters_dense": budget["reference_dense_parameters"],
         "quantized_weight_parameters": budget["reference_quantized_parameters"],
@@ -226,6 +231,30 @@ def validate_quant_database(
     }
     if mismatches:
         raise ValueError(f"Quantization database manifest mismatch: {mismatches}")
+    configured_processes = manifest.get("configured_torchrun_processes")
+    effective_processes = manifest.get("distributed_world_size")
+    if not isinstance(configured_processes, int) or configured_processes < 1:
+        raise ValueError(
+            "Manifest configured_torchrun_processes must be a positive integer."
+        )
+    if not isinstance(effective_processes, int) or effective_processes < 1:
+        raise ValueError("Manifest distributed_world_size must be a positive integer.")
+    if manifest.get("torchrun_process_override") != (
+        configured_processes != effective_processes
+    ):
+        raise ValueError("Manifest torchrun process-override provenance is inconsistent.")
+    loaded_tokens = manifest.get("calibration_token_count_loaded")
+    used_tokens = manifest.get("calibration_token_count_used")
+    if loaded_tokens != database["calibration_tokens"]:
+        raise ValueError(
+            "Manifest loaded calibration-token count does not match the request: "
+            f"expected={database['calibration_tokens']}, actual={loaded_tokens}."
+        )
+    if not isinstance(used_tokens, int) or not 0 < used_tokens <= loaded_tokens:
+        raise ValueError(
+            "Manifest used calibration-token count must be positive and no larger "
+            "than the loaded count."
+        )
 
 
 def common_eval_command(config: dict[str, Any], seed: int, python_bin: str) -> list[str]:
@@ -342,17 +371,27 @@ def build_command(
     python_bin: str,
     torchrun_bin: str,
     quant_db_root: str | None,
+    torchrun_processes: int | None = None,
 ) -> list[str]:
     database = config["quant_database"]
     search = config["search"]
     budget = config["budget"]
     if method == "prepare_db":
+        effective_torchrun_processes = (
+            database["torchrun_processes"]
+            if torchrun_processes is None
+            else torchrun_processes
+        )
+        if effective_torchrun_processes < 1:
+            raise ValueError("Database generation requires at least one torchrun process.")
         save_root = Path(quant_db_root or database["save_root"])
         return [
             torchrun_bin,
             "--nnodes=1",
-            f"--nproc-per-node={database['torchrun_processes']}",
+            f"--nproc-per-node={effective_torchrun_processes}",
             "quant.py",
+            "--configured_torchrun_processes",
+            str(database["torchrun_processes"]),
             "--model_name_or_path",
             config["model"],
             "--quantizable_modules",
@@ -559,9 +598,24 @@ def main() -> int:
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--torchrun", default="torchrun")
+    parser.add_argument(
+        "--torchrun-processes",
+        type=int,
+        default=None,
+        help=(
+            "Explicit prepare_db process-count override. The configured value remains "
+            "unchanged and both configured/effective values are logged as provenance."
+        ),
+    )
     parser.add_argument("--allow-unmanifested-db", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+
+    if args.torchrun_processes is not None:
+        if args.method != "prepare_db":
+            parser.error("--torchrun-processes is valid only for prepare_db.")
+        if args.torchrun_processes < 1:
+            parser.error("--torchrun-processes must be at least 1.")
 
     config_path = args.config.resolve()
     config = read_json(config_path)
@@ -590,6 +644,7 @@ def main() -> int:
         args.python,
         args.torchrun,
         args.quant_db_root,
+        args.torchrun_processes,
     )
     if args.dry_run:
         print(f"profile={config['profile']}")
@@ -597,6 +652,19 @@ def main() -> int:
         print(f"seed={args.seed}")
         print(f"quant_db={quant_db}")
         print(f"output_dir={output_dir}")
+        if args.method == "prepare_db":
+            configured_processes = config["quant_database"]["torchrun_processes"]
+            effective_processes = (
+                configured_processes
+                if args.torchrun_processes is None
+                else args.torchrun_processes
+            )
+            print(f"configured_torchrun_processes={configured_processes}")
+            print(f"effective_torchrun_processes={effective_processes}")
+            print(
+                "torchrun_process_override="
+                f"{str(effective_processes != configured_processes).lower()}"
+            )
         print(
             "expected_search_compute="
             f"{json.dumps(expected_search_compute(config, args.method), sort_keys=True)}"
@@ -628,6 +696,22 @@ def main() -> int:
         "quant_database": str(quant_db),
         "output_dir": str(output_dir),
         "configuration": config,
+        "runtime_overrides": {
+            "configured_torchrun_processes": (
+                config["quant_database"]["torchrun_processes"]
+                if args.method == "prepare_db"
+                else None
+            ),
+            "effective_torchrun_processes": (
+                (
+                    config["quant_database"]["torchrun_processes"]
+                    if args.torchrun_processes is None
+                    else args.torchrun_processes
+                )
+                if args.method == "prepare_db"
+                else None
+            ),
+        },
         "expected_search_compute": expected_search_compute(config, args.method),
     }
     write_json(output_dir / "resolved_config.json", resolved)
