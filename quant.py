@@ -24,6 +24,8 @@ import argparse
 import importlib.metadata
 import platform
 import time
+from collections import Counter
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
@@ -31,11 +33,18 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import wandb
 
 from src import dist_utils
-from src.calibration_utils import configured_calibration_partition
+from src.calibration_utils import (
+    calibration_token_digest,
+    configured_calibration_partition,
+)
 from src.common_utils import fix_seed
 from src.data_utils import get_data
+from src.memory_utils import cgroup_memory_snapshot, release_cpu_memory
 from src.quantizer import Quantizer
 from src.run_reporting import get_git_commit, utc_now, write_json
+
+
+MIN_DISK_CACHE_GPU_MEMORY_BYTES = 32 * 1024**3
 
 
 def installed_package_version(distribution_name):
@@ -43,6 +52,13 @@ def installed_package_version(distribution_name):
         return importlib.metadata.version(distribution_name)
     except importlib.metadata.PackageNotFoundError:
         return None
+
+
+def tensor_bytes_by_device(named_tensors):
+    totals = Counter()
+    for _, tensor in named_tensors:
+        totals[str(tensor.device)] += tensor.numel() * tensor.element_size()
+    return dict(sorted(totals.items()))
 
 
 def parse_args():
@@ -56,6 +72,12 @@ def parse_args():
             "calibration prefix and is recorded so a smaller physical-process "
             "override remains visible in the database manifest."
         ),
+    )
+    parser.add_argument(
+        "--attempt_id",
+        type=str,
+        default=None,
+        help="Launcher-generated identifier linking run, database, and spill provenance.",
     )
     # Model params
     parser.add_argument(
@@ -75,6 +97,18 @@ def parse_args():
         type=str,
         required=True,
         help="Regex for modules to quantize",
+    )
+    parser.add_argument(
+        "--expected_module_count",
+        type=int,
+        default=None,
+        help="Optional strict module count required before marking the database complete.",
+    )
+    parser.add_argument(
+        "--expected_reconstruction_dtype",
+        choices=["float16", "bfloat16", "float32"],
+        default=None,
+        help="Optional strict dtype required for saved dequantized reconstructions.",
     )
     parser.add_argument(
         "--pre_block_modules",
@@ -164,6 +198,20 @@ def parse_args():
     parser.add_argument("--cpu_offload_modules", action="store_true", help="whether to offload modules to CPU.")
     parser.add_argument("--cpu_offload_activations", action="store_true", help="whether to offload activations to CPU.")
     parser.add_argument(
+        "--load_model_to_gpu",
+        action="store_true",
+        help="Load the full model directly onto this rank's GPU via device_map.",
+    )
+    parser.add_argument(
+        "--activation_cache_dir",
+        type=str,
+        default=None,
+        help=(
+            "Optional empty directory for lossless disk-backed block activations. "
+            "Intended for single-process runs with strict CPU-memory limits."
+        ),
+    )
+    parser.add_argument(
         "--drop_saved_file_cache",
         action="store_true",
         help="Flush and evict each saved candidate file from Linux page cache to reduce cgroup RAM pressure.",
@@ -178,6 +226,20 @@ def parse_args():
         and args.configured_torchrun_processes < 1
     ):
         parser.error("--configured_torchrun_processes must be at least 1.")
+    if args.load_model_to_gpu and args.cpu_offload_modules:
+        parser.error("--load_model_to_gpu is incompatible with --cpu_offload_modules.")
+    if args.activation_cache_dir is not None and not args.load_model_to_gpu:
+        parser.error(
+            "--activation_cache_dir requires --load_model_to_gpu so model weights "
+            "do not consume the constrained CPU-memory budget."
+        )
+    if args.calibration_bitwidth not in args.bitwidth_options:
+        parser.error(
+            f"--calibration_bitwidth {args.calibration_bitwidth} must be included "
+            "in --bitwidth_options."
+        )
+    if args.expected_module_count is not None and args.expected_module_count < 1:
+        parser.error("--expected_module_count must be positive.")
     return args
 
 
@@ -195,27 +257,139 @@ def main():
             f"Distributed rank {rank} cannot map to cuda:{rank}; only "
             f"{visible_cuda_device_count} CUDA device(s) are visible."
         )
+    visible_cuda_device_total_memory_bytes = [
+        int(torch.cuda.get_device_properties(index).total_memory)
+        for index in range(visible_cuda_device_count)
+    ]
     configured_torchrun_processes = args.configured_torchrun_processes or world_size
+    if args.activation_cache_dir is not None and world_size != 1:
+        raise ValueError(
+            "Disk-backed activation caching currently requires an effective "
+            f"world size of 1, got {world_size}."
+        )
+    if (
+        args.activation_cache_dir is not None
+        and visible_cuda_device_total_memory_bytes[rank]
+        < MIN_DISK_CACHE_GPU_MEMORY_BYTES
+    ):
+        raise RuntimeError(
+            "Disk-backed Stage 1 requires at least 32 GiB of GPU memory for the "
+            "FP16 model, Hessians, and GPTQ workspace; detected "
+            f"{visible_cuda_device_total_memory_bytes[rank]} bytes on cuda:{rank}."
+        )
     # init device
     device = f"cuda:{rank}"
+    database_timestamp_start = utc_now()
+    cgroup_memory_at_initialization = cgroup_memory_snapshot()
+    args.save_dir = str(
+        (
+            Path(args.save_dir)
+            / args.model_name_or_path.split("/")[-1]
+            / f"{args.calibration_bitwidth}bit"
+        ).resolve()
+    )
+    if args.activation_cache_dir is not None:
+        args.activation_cache_dir = str(Path(args.activation_cache_dir).resolve())
+        database_path = Path(args.save_dir)
+        cache_path = Path(args.activation_cache_dir)
+        if (
+            database_path == cache_path
+            or database_path in cache_path.parents
+            or cache_path in database_path.parents
+        ):
+            raise ValueError(
+                "Activation cache and quantization database must be separate, "
+                f"non-nested paths: database={database_path}, cache={cache_path}."
+            )
+        if cache_path.exists():
+            raise FileExistsError(
+                f"Refusing to reuse existing activation cache: {cache_path}"
+            )
+    if dist_utils.is_main():
+        os.makedirs(args.save_dir, exist_ok=False)
+        write_json(
+            os.path.join(args.save_dir, "quant_database_manifest.json"),
+            {
+                "schema_version": 1,
+                "status": "initializing",
+                "timestamp_start": database_timestamp_start,
+                "attempt_id": args.attempt_id,
+                "git_commit": get_git_commit(
+                    os.path.dirname(os.path.abspath(__file__))
+                ),
+                "model_name": args.model_name_or_path,
+                "expected_module_count": args.expected_module_count,
+                "expected_reconstruction_dtype": (
+                    args.expected_reconstruction_dtype
+                ),
+                "configured_torchrun_processes": configured_torchrun_processes,
+                "distributed_world_size": world_size,
+                "visible_cuda_device_total_memory_bytes": (
+                    visible_cuda_device_total_memory_bytes
+                ),
+                "database_memory_mode": (
+                    "disk_activation_cache"
+                    if args.activation_cache_dir is not None
+                    else "in_memory_activations"
+                ),
+                "model_residency_requested": (
+                    "gpu_direct" if args.load_model_to_gpu else "legacy"
+                ),
+                "activation_cache_dir": args.activation_cache_dir,
+                "cgroup_memory_at_initialization": cgroup_memory_at_initialization,
+            },
+        )
+    dist.barrier()
     if args.dtype != "auto":
         args.dtype = getattr(torch, args.dtype)
     # init W&B logger
     if args.log_wandb and dist_utils.is_main():
         wandb.init(config=args)
     # Model
+    torch.cuda.reset_peak_memory_stats(device)
+    model_load_kwargs = {}
+    if args.load_model_to_gpu:
+        model_load_kwargs["device_map"] = {"": device}
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
         trust_remote_code=True,
         torch_dtype=args.dtype,
         low_cpu_mem_usage=args.low_cpu_mem_usage,
         attn_implementation=args.attn_implementation,
+        **model_load_kwargs,
     )
     dense_parameter_count = sum(parameter.numel() for parameter in model.parameters())
     model_revision = getattr(model.config, "_commit_hash", None)
+    parameter_device_bytes = tensor_bytes_by_device(model.named_parameters())
+    buffer_device_bytes = tensor_bytes_by_device(model.named_buffers())
+    gpu_direct_verified = False
+    if args.load_model_to_gpu:
+        expected_device = str(torch.device(device))
+        non_gpu_parameter_bytes = sum(
+            byte_count
+            for tensor_device, byte_count in parameter_device_bytes.items()
+            if tensor_device != expected_device
+        )
+        if non_gpu_parameter_bytes != 0:
+            raise RuntimeError(
+                "Direct-GPU loading left model parameters outside the assigned GPU: "
+                f"expected_device={expected_device}, inventory={parameter_device_bytes}."
+            )
+        non_gpu_buffer_bytes = sum(
+            byte_count
+            for tensor_device, byte_count in buffer_device_bytes.items()
+            if tensor_device != expected_device
+        )
+        if non_gpu_buffer_bytes != 0:
+            raise RuntimeError(
+                "Direct-GPU loading left model buffers outside the assigned GPU: "
+                f"expected_device={expected_device}, inventory={buffer_device_bytes}."
+            )
+        gpu_direct_verified = True
     print(model)
-    if not args.cpu_offload_modules:
+    if not args.cpu_offload_modules and not args.load_model_to_gpu:
         model = model.to(device)
+    release_cpu_memory()
     # Tokenizer
     tokenizer_name = args.tokenizer_name or args.model_name_or_path
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=False)
@@ -231,6 +405,7 @@ def main():
     calibration_token_count_loaded = sum(
         int(input_ids.shape[-1]) for input_ids in calibration_data
     )
+    calibration_token_digest_loaded = calibration_token_digest(calibration_data)
     # Preserve the configured multi-process calibration semantics even when a
     # smaller physical world size is explicitly used. Upstream splits with
     # floor division, so it drops the tail that cannot be divided equally among
@@ -250,6 +425,7 @@ def main():
     calibration_token_count_used = sum(
         int(input_ids.shape[-1]) for input_ids in calibration_data
     )
+    calibration_token_digest_used = calibration_token_digest(calibration_data)
     sequences_per_effective_rank = calibration_sequence_count_used // world_size
     calibration_token_counts_by_effective_rank = [
         sum(
@@ -290,10 +466,6 @@ def main():
         args.calibration_bitwidth
     ]
     dist_utils.print_on_main(f"Bitwidth options: {args.bitwidth_options}")
-    # Override save dir name
-    args.save_dir = os.path.join(
-        args.save_dir, args.model_name_or_path.split("/")[-1], f"{args.calibration_bitwidth}bit"
-    )
     quantizer = Quantizer(
         model,
         calibration_data,
@@ -312,9 +484,13 @@ def main():
         device=device,
         cpu_offload_modules=args.cpu_offload_modules,
         cpu_offload_activations=args.cpu_offload_activations,
+        activation_cache_dir=args.activation_cache_dir,
         drop_saved_file_cache=args.drop_saved_file_cache,
         verbose=args.verbose,
+        attempt_id=args.attempt_id,
     )
+    del calibration_data
+    release_cpu_memory()
     tokenizer_provenance = {
         "tokenizer_name": tokenizer_name,
         "tokenizer_class": tokenizer.__class__.__name__,
@@ -325,17 +501,44 @@ def main():
         "configured_torchrun_processes": configured_torchrun_processes,
         "distributed_world_size": world_size,
         "torchrun_process_override": configured_torchrun_processes != world_size,
+        "database_memory_mode": (
+            "disk_activation_cache"
+            if args.activation_cache_dir is not None
+            else "in_memory_activations"
+        ),
+        "model_residency": (
+            "gpu_direct"
+            if gpu_direct_verified
+            else (
+                "cpu_block_offload"
+                if args.cpu_offload_modules
+                else "gpu_after_cpu_load"
+            )
+        ),
+        "activation_cache_dir": args.activation_cache_dir,
+        "activation_cache_retained": args.activation_cache_dir is not None,
+        "parameter_bytes_by_device_after_load": parameter_device_bytes,
+        "buffer_bytes_by_device_after_load": buffer_device_bytes,
+        "gpu_direct_residency_verified": gpu_direct_verified,
+        "cgroup_memory_at_initialization": cgroup_memory_at_initialization,
+        "cgroup_memory_at_manifest_start": cgroup_memory_snapshot(),
         "visible_cuda_device_count": visible_cuda_device_count,
         "visible_cuda_device_names": [
             torch.cuda.get_device_name(index)
             for index in range(visible_cuda_device_count)
         ],
+        "visible_cuda_device_total_memory_bytes": (
+            visible_cuda_device_total_memory_bytes
+        ),
         "calibration_sequence_count_loaded": calibration_sequence_count_loaded,
         "calibration_sequence_count_used": calibration_sequence_count_used,
         "calibration_sequence_count_per_rank": calibration_sequence_count_per_rank,
         "calibration_logical_shard_count": logical_shard_count,
         "calibration_token_count_loaded": calibration_token_count_loaded,
         "calibration_token_count_used": calibration_token_count_used,
+        "calibration_token_digest_algorithm": "sha256-v1-dtype-shape-boundaries",
+        "calibration_token_digest_loaded": calibration_token_digest_loaded,
+        "calibration_token_digest_used": calibration_token_digest_used,
         "calibration_token_count_rank0": calibration_token_counts_by_effective_rank[0],
         "calibration_token_counts_by_effective_rank": (
             calibration_token_counts_by_effective_rank
@@ -358,16 +561,16 @@ def main():
             "flash_attn": installed_package_version("flash-attn"),
         },
     }
-    # Prepare save dir
+    # Update the exclusively-created target with complete calibration provenance.
     if dist_utils.is_main():
-        os.makedirs(args.save_dir, exist_ok=True)
         manifest_path = os.path.join(args.save_dir, "quant_database_manifest.json")
         write_json(
             manifest_path,
             {
                 "schema_version": 1,
                 "status": "generating",
-                "timestamp_start": utc_now(),
+                "timestamp_start": database_timestamp_start,
+                "attempt_id": args.attempt_id,
                 "git_commit": get_git_commit(os.path.dirname(os.path.abspath(__file__))),
                 "model_name": args.model_name_or_path,
                 "model_revision": model_revision,
@@ -399,6 +602,16 @@ def main():
     t1 = time.perf_counter()
     quantizer.quantize(args.bitwidth_options, args.calibration_bitwidth)
     t2 = time.perf_counter()
+    execution_provenance["activation_cache_summary"] = (
+        quantizer.activation_cache_summary
+    )
+    execution_provenance["cgroup_memory_at_completion"] = cgroup_memory_snapshot()
+    execution_provenance["peak_gpu_memory_allocated_bytes"] = int(
+        torch.cuda.max_memory_allocated(device)
+    )
+    execution_provenance["peak_gpu_memory_reserved_bytes"] = int(
+        torch.cuda.max_memory_reserved(device)
+    )
     dist_utils.print_on_main(f"Quantization took {(t2 - t1)} s.")
     if dist_utils.is_main():
         module_names = sorted(
@@ -406,6 +619,15 @@ def main():
             for name in os.listdir(args.save_dir)
             if os.path.isdir(os.path.join(args.save_dir, name))
         )
+        if not module_names:
+            raise RuntimeError("Refusing to mark an empty quantization database complete.")
+        if args.expected_module_count is not None and len(module_names) != (
+            args.expected_module_count
+        ):
+            raise RuntimeError(
+                "Refusing to mark a database with the wrong module count complete: "
+                f"expected={args.expected_module_count}, actual={len(module_names)}."
+            )
         levels_by_module = {
             name: sorted(
                 int(filename[:-4])
@@ -414,6 +636,56 @@ def main():
             )
             for name in module_names
         }
+        reconstruction_metadata = quantizer.saved_reconstruction_metadata
+        if set(reconstruction_metadata) != set(module_names):
+            raise RuntimeError(
+                "Saved reconstruction metadata does not match module directories."
+            )
+        expected_levels = sorted(args.bitwidth_options)
+        incomplete_modules = {
+            name: levels
+            for name, levels in levels_by_module.items()
+            if levels != expected_levels
+        }
+        if incomplete_modules:
+            raise RuntimeError(
+                "Refusing to mark an incomplete quantization database complete: "
+                f"{incomplete_modules}"
+            )
+        level_file_sizes_bytes = {
+            name: {
+                str(level): reconstruction_metadata[name][str(level)][
+                    "file_size_bytes"
+                ]
+                for level in expected_levels
+            }
+            for name in module_names
+        }
+        if args.expected_reconstruction_dtype is not None:
+            dtype_mismatches = {
+                f"{name}/{level}": metadata["dtype"]
+                for name, levels in reconstruction_metadata.items()
+                for level, metadata in levels.items()
+                if metadata["dtype"] != args.expected_reconstruction_dtype
+            }
+            if dtype_mismatches:
+                raise RuntimeError(
+                    "Saved reconstruction dtypes do not match the expected dtype: "
+                    f"{dtype_mismatches}"
+                )
+        database_payload_bytes = sum(
+            size_bytes
+            for module_sizes in level_file_sizes_bytes.values()
+            for size_bytes in module_sizes.values()
+        )
+        if any(
+            size_bytes <= 0
+            for module_sizes in level_file_sizes_bytes.values()
+            for size_bytes in module_sizes.values()
+        ):
+            raise RuntimeError(
+                "Refusing to mark a database with empty reconstruction files complete."
+            )
         quantized_weight_parameters = sum(
             int(model.get_submodule(name).in_features)
             * int(model.get_submodule(name).out_features)
@@ -424,7 +696,9 @@ def main():
             {
                 "schema_version": 1,
                 "status": "complete",
+                "timestamp_start": database_timestamp_start,
                 "timestamp_end": utc_now(),
+                "attempt_id": args.attempt_id,
                 "git_commit": get_git_commit(os.path.dirname(os.path.abspath(__file__))),
                 "model_name": args.model_name_or_path,
                 "model_revision": model_revision,
@@ -450,6 +724,9 @@ def main():
                 "module_count": len(module_names),
                 "module_names": module_names,
                 "levels_by_module": levels_by_module,
+                "level_file_sizes_bytes": level_file_sizes_bytes,
+                "reconstruction_metadata": reconstruction_metadata,
+                "database_payload_bytes": database_payload_bytes,
                 "runtime_seconds": t2 - t1,
                 "database_representation": (
                     "dequantized floating-point reconstruction tensors; not packed storage"

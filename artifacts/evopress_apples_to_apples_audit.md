@@ -2,7 +2,14 @@
 
 Date: 2026-08-18
 
-Status: implementation and CPU-side validation complete; no full Mistral GPU run was launched.
+Status: implementation and CPU-side validation complete. The first Stage 1
+database attempt ended with a DataLab server/container restart after writing a
+`status=generating` manifest but before producing any module reconstruction.
+The legacy retained-activation design required far more than the detected
+16 GiB CPU-memory cgroup and is the leading explanation, but no surviving OOM
+trace proves the exact termination mechanism or phase. No E0--E3 experiment was
+launched. A lossless disk-streaming retry path is implemented but has not yet
+been launched.
 
 ## 1. Paper configuration
 
@@ -171,47 +178,149 @@ Each generation CSV records accepted offspring, proposal attempts, candidates/to
 - `src/compression_budget.py`: shared cost, exact target derivation, database inspection, exact feasibility validation, and bounded repair.
 - `evo_quant_search.py`: opt-in exact total budgeting, live-reference validation, database scope/level checks, paper-compatible unevaluated integer initialization, exact counters, and structured cost/runtime reporting.
 - `evo_joint_search.py`: opt-in exact total budgeting and repair for every candidate, live-reference validation, paper-compute-matched single-parent initialization, and detailed evaluation/attempt/runtime counters.
-- `src/run_reporting.py`: metadata-inclusive storage breakdown and expanded generation counters/KL logging.
-- `quant.py`: effective seeding, configured-shard emulation for explicit smaller process counts, and a provenance manifest recording database representation, tokenizer/model revisions, configured/effective process counts, calibration loaded/used counts, software versions, parameter counts, levels, scope, runtime, and git commit.
-- `configs/apples_to_apples/mistral7b_v03_paper_matched.json`: full paper-schedule profile.
+- `src/run_reporting.py`: metadata-inclusive storage breakdown, expanded generation counters/KL logging, and atomic JSON replacement.
+- `src/activation_cache.py`: exclusive, non-resumable, lossless per-sequence disk storage for complete block input args/kwargs, with ordered one-record-at-a-time reads, atomic per-record hidden-state replacement, block-boundary progress/byte counters, and an attempt-linked manifest.
+- `src/memory_utils.py`: cgroup-v2 memory snapshots and explicit release of unused CPU allocator arenas.
+- `src/model_utils.py` and `src/quantizer.py`: optional activation streaming that preserves the original two-pass sequential-GPTQ semantics while retaining only one calibration record in CPU memory at a time.
+- `quant.py`: effective seeding, configured-shard emulation for explicit smaller process counts, ordered calibration-token digests, verified direct-to-GPU parameter and buffer placement, a 32 GiB GPU-capacity floor for disk mode, exclusive database creation, lifecycle/attempt provenance, device-byte inventories, cgroup/CUDA memory records, activation-cache statistics, and per-reconstruction shape/dtype/size/SHA-256 metadata.
+- `configs/apples_to_apples/mistral7b_v03_paper_matched.json`: full paper-schedule profile, including the exact expected Mistral projection shapes and FP16 reconstruction dtype used by generation and postflight validation.
 - `configs/apples_to_apples/mistral7b_v03_compute_matched.json`: smaller equal-compute profile.
 - `requirements.txt`: explicit prebuilt FlashAttention 2.8.3 wheel for the audited DataLab Python 3.11/PyTorch 2.8/CUDA 12/CXX11-ABI environment; this avoids an unavailable local CUDA-toolkit build.
-- `scripts/run_apples_to_apples.py`: non-overwriting database/evaluation/search launcher with strict preflight checks and resolved configuration/runtime artifacts.
+- `scripts/run_apples_to_apples.py`: non-overwriting database/evaluation/search launcher with an explicit disk-cache mode; path-separation, nonexistence, non-`tmpfs`/`ramfs`, write/fsync, capacity, and inode preflights; line-flushed child logging, attempt-linked cgroup/process-tree samples, and orphan-safe process-group cleanup; lifecycle status; strict search-summary checks; and full reconstruction/cache postflight validation before completion.
+- `scripts/smoke_stage1_memory_path.py`: non-quantizing one-A40 preflight that loads the exact Mistral model directly on CUDA, verifies FP16 parameter/buffer residency and architecture counts, and round-trips one real 8,192-token first-block record through the disk cache without touching the production database.
 - `scripts/aggregate_apples_to_apples.py`: strict equal-budget aggregation, mean/std table, and paired `joint - quant_only` seed differences.
 - `tests/test_compression_budget.py`: exact cost and repair tests, including the Mistral architecture constants.
-- `tests/test_apples_to_apples_workflow.py`: config, command, dry-run, one/eight-process calibration-prefix equivalence, manifest provenance, and aggregation tests.
+- `tests/test_apples_to_apples_workflow.py`: config, command, dry-run, one/eight-process calibration-prefix equivalence, manifest/file validation, memory-mode CLI, and aggregation tests.
+- `tests/test_activation_cache.py`: lossless ordered Mistral-shaped payload tests, collision safety, hidden-state propagation, and a real two-block FastOBQ/QLinear disk-versus-memory bit-exact comparison.
+- `tests/test_smoke_stage1_memory_path.py`: CPU-only validation of smoke-test path ownership/cleanup, model residency checks, exact Mistral architecture assertions, and captured-input validation.
 
 All new behavior is opt-in. Legacy CLI budget modes and previous result files remain unchanged.
 
 ## 8. Validation
 
+### DataLab Stage 1 failure audit
+
+The failed one-process attempt is retained, not repaired or reused:
+
+- launcher artifacts: `/home/jovyan/evopress/results/apples_to_apples/paper_matched/prepare_db/mistral7b_full_gptq_db`;
+- partial database: `/home/jovyan/evopress_quant/Mistral-7B-v0.3/3bit`;
+- database contents: only a `status=generating` manifest, zero module directories, and zero reconstructions;
+- launcher contents: command/resolved configuration and an empty buffered log,
+  with no runtime/status file because the process/container did not return
+  control to that version of the launcher before the server restarted.
+
+The manifest proves that 7,513 sequences and all 8,388,608 requested tokens
+were loaded. Emulation of the configured eight-way floor split retained the
+first 7,512 sequences (8,387,504 tokens) and dropped one 1,104-token tail. The
+retained tensor payload implied by the observed Mistral block inputs is
+estimated as:
+
+```text
+FP16 hidden states = 8,387,504 * 4,096 * 2 = 68,710,432,768 bytes = 63.9916 GiB
+FP16 RoPE cos/sin  = 8,387,504 * 128 * 2 * 2 = 4,294,402,048 bytes = 3.9995 GiB
+position/cache IDs = at most 8,387,504 * 8 * 2 = 134,200,064 bytes = 0.1250 GiB
+estimated activation tensor payload                  73,139,034,880 bytes = 68.1160 GiB
+FP16 dense parameters = 7,248,023,552 * 2            14,496,047,104 bytes = 13.5005 GiB
+combined tensor payload                               87,635,081,984 bytes = 81.6165 GiB
+```
+
+The activation estimate assumes FP16 hidden/RoPE tensors and two int64 ID
+tensors for the recorded Transformers 4.56 Mistral input structure; aliasing or
+additional kwargs can change the realized serialized size. It also excludes
+Python and serialization overhead. Even without that overhead, the legacy
+algorithm could not complete while retaining this payload under the exact
+17,179,869,184-byte cgroup limit. The partial artifacts are consistent with a
+failure during block-input collection, but the empty log and reset cgroup event
+counters mean neither the exact phase nor a kernel OOM action is forensically
+proven.
+
+The retry loads the model directly onto the assigned CUDA device and rejects
+disk mode unless every model parameter and buffer is observed there. It also
+requires at least 32 GiB total GPU memory; the audited A40 reports about
+44.4 GiB. Complete `(args, kwargs)` records are serialized losslessly,
+processed one at a time in original order, and updated only after all seven
+projections of a block have been replaced by their calibration-level QLinear
+modules. It does not batch or pad samples, so the calibration examples and the
+original two-pass sequential-GPTQ semantics are unchanged. A clean two-block
+FastOBQ test produces `torch.equal` reconstructions and final outputs for the
+in-memory and disk paths.
+
+The estimated activation-cache tensor payload is 73,139,034,880 bytes
+(68.1160 GiB); the actual serialized scratch size is not known until generation
+and is recorded by cache telemetry. The exact raw tensor payload of the five
+FP16 reconstruction levels is
+`6,979,321,856 * 5 * 2 = 69,793,218,560` bytes (65.0000 GiB), before `.pth`
+container/filesystem overhead. Their combined estimated/raw payload is
+133.1160 GiB. The launcher therefore requires at least 100 GiB free for each
+output when they are on separate filesystems, or 200 GiB when they share one.
+Across initial collection and two reads plus one rewrite for each of 32 blocks,
+the cache causes roughly `68.116 * (1 + 3*32) = 6,607.3 GiB` (about 6.45 TiB)
+of cumulative scratch I/O.
+
+Cache creation is exclusive and deliberately non-resumable. Each record is
+replaced atomically, but the manifest is checkpointed only after initial
+collection and each complete block. A crash during a block can therefore leave
+mixed-generation records and stale counters; the launcher never treats that as
+a reusable checkpoint. Telemetry records the attempt ID, status, sample count,
+current size, cumulative bytes read/written, and completed blocks. Only a child
+exit code of zero followed by a `status=complete` database manifest, a passing
+postflight, and launcher `status=completed` establishes Stage 1 success.
+
+The production postflight reopens all 1,120 expected files and validates the
+exact 224 module names and five levels; FP16 dtype; shapes `q_proj/o_proj =
+[4096, 4096]`, `k_proj/v_proj = [1024, 4096]`, `gate_proj/up_proj = [14336,
+4096]`, and `down_proj = [4096, 14336]`; nonempty/finite/contiguous CPU
+tensors; per-file size and SHA-256; and the total database payload. It also
+cross-checks the completed cache manifest, attempt ID, 7,512 records, and 32
+completed blocks. Calibration-token digests bind dtype, shape, record
+boundaries, and order. These hashes are recomputed against metadata created by
+the same run; they detect corruption or mismatch but are not an externally
+published known-good paper checksum.
+
 Executed without a full model download or GPU experiment:
 
 - `python -m pytest -q tests/test_compression_budget.py tests/test_apples_to_apples_workflow.py tests/test_run_reporting.py tests/test_eval_ppl_compression_loading.py --disable-warnings`: passed.
 - Component-crossover, joint-aware, and sequential-search tests: passed.
-- Complete suite with an isolated result root and optional launcher dependency probes disabled: 161 passed.
+- The activation-cache, real-model smoke helpers, I/O integrity, and launcher/workflow target passes **34 tests**.
+- Complete isolated suite after memory-safe hardening: **184 passed**.
 - `python -m py_compile` on every changed Python entry point: passed.
 - `git diff --check`: passed.
 - Paper and compute profile dry runs: passed; commands contain the intended full scope, exact target assertions, schedules, and slow-tokenizer behavior.
+- The exact planned DataLab retry dry-run passed and contains one process,
+  expected module count 224, no CPU module offload, direct-GPU loading, and the
+  unique disk-cache path.
 
-The first unisolated full-suite attempt reached 95 passes and failed one launcher dry-run test because existing repository result directories were detected as completed. The original isolated implementation suite passed 156 tests; after adding the explicit one-GPU database path, provenance checks, and prebuilt-wheel regression check, the latest isolated suite passes all 161 tests. Four launcher tests also fail in this local environment when optional dependency probes are enabled because `datasets`, `accelerate`, and `sentencepiece` are not installed; the algorithm tests and dry runs do not require those packages.
+The first unisolated full-suite attempt reached 95 passes and failed one launcher dry-run test because existing repository result directories were detected as completed. The pre-spill implementation's latest isolated suite passed all 161 tests. Optional launcher dependency probes remain disabled locally because `datasets`, `accelerate`, and `sentencepiece` are not installed; the DataLab environment has already verified those dependencies and the FlashAttention CUDA kernel.
 
 No multi-hour Mistral search, GPTQ generation, or perplexity evaluation was run during implementation.
 
 ## 9. Exact full-run commands
 
-Run from the repository root. Replace `/mnt/evopress_quant` with storage that has enough space for the dequantized five-level database.
+Run from the repository root. The paths below are the planned unique DataLab
+retry targets. They intentionally do not reuse the failed attempt.
 
 ```bash
 PAPER_CONFIG=configs/apples_to_apples/mistral7b_v03_paper_matched.json
-DB_ROOT=/mnt/evopress_quant
-QUANT_DB=/mnt/evopress_quant/Mistral-7B-v0.3/3bit
+DB_ROOT=/home/jovyan/evopress_quant_stage1_1gpu_diskspill_attempt2_20260818
+QUANT_DB="$DB_ROOT/Mistral-7B-v0.3/3bit"
+ACTIVATION_CACHE=/tmp/evopress_activation_spill_stage1_attempt2_20260818
+```
+
+After the DataLab filesystem and dependency checks, but before database
+generation, exercise the actual one-A40 model-loading and disk-record path
+without creating a quantization database:
+
+```bash
+python scripts/smoke_stage1_memory_path.py \
+  --scratch-parent /tmp \
+  --device-index 0 \
+  --seed 0
 ```
 
 Generate the one shared GPTQ level database:
 
 ```bash
-python scripts/run_apples_to_apples.py prepare_db --config "$PAPER_CONFIG" --seed 0 --quant-db-root "$DB_ROOT" --run-id mistral7b_full_gptq_db
+python scripts/run_apples_to_apples.py prepare_db --config "$PAPER_CONFIG" --seed 0 --quant-db-root "$DB_ROOT" --run-id mistral7b_full_gptq_db_8gpu
 ```
 
 The command above retains the upstream eight-process default. The Stage 1
@@ -221,6 +330,33 @@ deviation was explicitly authorized. For that allocation, use:
 ```bash
 python scripts/run_apples_to_apples.py prepare_db --config "$PAPER_CONFIG" --seed 0 --quant-db-root "$DB_ROOT" --run-id mistral7b_full_gptq_db --torchrun-processes 1
 ```
+
+The command immediately above is no longer safe under DataLab's 16 GiB CPU
+cgroup. The required one-A40 invocation is:
+
+```bash
+python scripts/run_apples_to_apples.py prepare_db \
+  --config "$PAPER_CONFIG" \
+  --seed 0 \
+  --quant-db-root "$DB_ROOT" \
+  --run-id mistral7b_full_gptq_db_1gpu_diskspill_attempt2_20260818 \
+  --torchrun-processes 1 \
+  --database-memory-mode disk_activation_cache \
+  --activation-cache-dir "$ACTIVATION_CACHE"
+```
+
+Before launch, the launcher rejects any existing database, spill, or run leaf;
+rejects nested output paths and memory-backed `tmpfs`/`ramfs`; performs a real
+create/write/fsync/unlink permission probe; and requires at least 100 GiB free
+on each separate filesystem (200 GiB if they share one), plus the configured
+inode floor. Checks are performed against the nearest existing ancestor before
+the exclusive leaves are created. The spill performs roughly 6.45 TiB of
+cumulative read/write traffic across 32 blocks, so a local disk-backed `/tmp`
+is preferred over the network-mounted home filesystem only after the preflight
+confirms its filesystem type, writable/fsync behavior, free capacity, and
+inodes; a `tmpfs` `/tmp` is rejected. The spill is execution scratch and is not
+part of the scientific database. Actual cache and database payload sizes are
+recorded rather than inferred from the preflight estimates.
 
 This override does not modify the `paper_matched` profile. Database generation
 first truncates to the same calibration-sequence prefix selected by the
@@ -268,7 +404,22 @@ The launcher refuses to overwrite a nonempty database target, nonempty run direc
 
 Default run directories are `results/apples_to_apples/<profile>/<method>/<run-id>/`.
 
-Every run contains `resolved_config.json`, `command.sh`, `run.log`, `runtime.json`, `launcher_status.json`, and `run_summary.json`. Search runs additionally contain `generation_log.csv`, `final_candidate.json`, and the text/JSON depth and/or quantization configurations. Dense and uniform runs also receive an explicit `final_candidate.json`; uniform lists all 224 modules at level 3. Database provenance is stored at `<quant-db>/quant_database_manifest.json`.
+Every run contains `resolved_config.json`, `command.sh`, `run.log`,
+`resource_samples.jsonl`, `runtime.json`, and `launcher_status.json`;
+completed experiment runs also contain `run_summary.json`. Search runs
+additionally contain `generation_log.csv`, `final_candidate.json`, and the
+text/JSON depth and/or quantization configurations. Dense and uniform runs also
+receive an explicit `final_candidate.json`; uniform lists all 224 modules at
+level 3. Database provenance and the 1,120-file reconstruction inventory
+(shape, dtype, number of elements, contiguity, file size, and SHA-256), plus its
+total byte payload, are stored at
+`<quant-db>/quant_database_manifest.json`. Disk mode also retains
+`<activation-cache>/activation_cache_manifest.json` plus the 7,512 scratch
+records for explicit postmortem inspection; they are not a reusable checkpoint.
+Cache counters are only block-boundary durable and may lag the files after an
+abrupt failure. Launcher lifecycle JSON and periodic resource samples are
+atomically/fsync persisted, while the child log is line-flushed and fsynced on
+normal return, so its final tail is not guaranteed after container loss.
 
 Aggregation produces:
 
@@ -288,7 +439,25 @@ The aggregator rejects duplicate method/seed summaries, differing compressed tar
 6. The joint operator devotes proposals to two component types and uses one quantization exchange, whereas original quant-only EvoPress spends every proposal on a biased 1--3 quantization exchange. Candidate evaluations/tokens are equal, but the mutation kernels necessarily differ.
 7. FineWeb-Edu and the model ID are not pinned to immutable Hugging Face revisions in upstream EvoPress or this profile. The new database manifest records the resolved model commit when available, but exact future data replay would benefit from a pinned FineWeb snapshot/cache artifact.
 8. WikiText-2 and C4 loaders ignore the nominal `eval_tokens` argument and evaluate the complete number of 8,192-token chunks constructed by the repository. Actual loaded token counts are recorded in search summaries. This is common to both methods but should not be described as exactly 524,288 evaluation tokens.
-9. The current DataLab allocation has one A40 rather than the upstream eight-process database-generation setup. Stage 1 therefore uses the explicit `--torchrun-processes 1` deviation while emulating the configured eight-way calibration prefix. This preserves the shared examples and method-to-method fairness but is not bit-for-bit identical to an eight-GPU reduction order. The deviation must remain reported when comparing against the paper. FlashAttention 2 and database storage passed the DataLab preflight.
+9. The current DataLab allocation has one A40 rather than the upstream eight-process database-generation setup. Stage 1 therefore uses the explicit `--torchrun-processes 1` deviation while emulating the configured eight-way calibration prefix. This preserves the shared examples and method-to-method fairness but is not bit-for-bit identical to an eight-GPU reduction order. The deviation must remain reported when comparing against the paper. FlashAttention 2 passed its kernel preflight; the new local spill path still requires a fresh DataLab capacity/write/inode check before launch.
 10. The paper result is a reference, not an acceptance threshold. Tokenizer/library/model/data revisions and hardware kernels can shift perplexity. The uniform 3-bit E1 result is the first required sanity check before interpreting E2/E3.
+11. Disk streaming changes only execution storage, not calibration examples or
+GPTQ math, and the toy FastOBQ path is bit-exact. The real-Mistral one-record
+smoke utility has passed CPU-side helper tests but has not yet been executed on
+DataLab; that smoke and a successful 224-module postflight are still required
+before claiming that Stage 1 itself is complete.
+12. The scratch path sees approximately 6.4 TiB of cumulative I/O. Runtime can
+therefore be materially longer than an unconstrained in-memory eight-GPU run;
+database generation runtime is infrastructure provenance, not matched E2/E3
+search compute. Both comparison methods reuse the exact same completed database.
+13. The activation-cache manifest is checkpointed after collection and after
+each full block, not after every record. Its counters may therefore be stale
+after an abrupt mid-collection or mid-block failure. This is diagnostic only:
+the cache is never resumable, and the validated quantization-database manifest
+plus launcher `completed` state are the sole success criteria.
+14. Reconstruction and calibration hashes are strong artifact-integrity and
+provenance checks, but the expected values are generated by the same run rather
+than compared with an independently published EvoPress checksum. They do not
+establish agreement with the paper by themselves.
 
 Required full GPU workload: eight experimental runs (one dense, one uniform, three quant-only, three joint) plus one shared, expensive GPTQ database-generation job: nine GPU jobs total. Upstream uses eight database-generation processes; the currently authorized Stage 1 invocation uses one physical process with the configured eight-way calibration prefix. Running the optional smaller three-seed search comparison adds six search jobs but reuses the same database.

@@ -247,10 +247,16 @@ class ForwardInterrupt(Exception):
 
 class InputCollector(nn.Module):
 
-    def __init__(self, module: nn.Module, cpu_offload: bool = False):
+    def __init__(
+        self,
+        module: nn.Module,
+        cpu_offload: bool = False,
+        input_cache=None,
+    ):
         super().__init__()
         self.module = module
         self.cpu_offload = cpu_offload
+        self.input_cache = input_cache
         self.input_args = []
         self.input_kwargs = []
 
@@ -262,8 +268,11 @@ class InputCollector(nn.Module):
         if self.cpu_offload:
             input_args = to(input_args, device="cpu")
             input_kwargs = to(input_kwargs, device="cpu")
-        self.input_args.append(input_args)
-        self.input_kwargs.append(input_kwargs)
+        if self.input_cache is None:
+            self.input_args.append(input_args)
+            self.input_kwargs.append(input_kwargs)
+        else:
+            self.input_cache.append(input_args, input_kwargs)
         raise ForwardInterrupt
 
 

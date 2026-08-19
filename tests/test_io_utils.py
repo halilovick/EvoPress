@@ -1,3 +1,4 @@
+import hashlib
 import os
 import tempfile
 import unittest
@@ -32,6 +33,22 @@ class TorchSaveTest(unittest.TestCase):
 
         fsync.assert_called_once()
         self.assertTrue(torch.equal(tensor, loaded))
+
+    def test_optional_hash_matches_exact_saved_file(self):
+        tensor = torch.tensor([6.0, 7.0], dtype=torch.float16)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "tensor.pth")
+            digest = torch_save(
+                tensor,
+                path,
+                drop_file_cache=True,
+                compute_sha256=True,
+            )
+            with open(path, "rb") as handle:
+                expected = hashlib.sha256(handle.read()).hexdigest()
+
+        self.assertEqual(digest, expected)
 
 
 if __name__ == "__main__":

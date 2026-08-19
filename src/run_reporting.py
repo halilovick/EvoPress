@@ -10,6 +10,7 @@ import platform
 import resource
 import subprocess
 import time
+import uuid
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from numbers import Integral, Real
@@ -467,9 +468,25 @@ def _json_value(value: Any) -> Any:
 def write_json(path: str | os.PathLike[str], value: Mapping[str, Any]) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as handle:
-        json.dump(_json_value(value), handle, indent=2, sort_keys=True, allow_nan=False)
-        handle.write("\n")
+    temporary_path = output_path.parent / (
+        f".{output_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    )
+    try:
+        with temporary_path.open("x", encoding="utf-8") as handle:
+            json.dump(
+                _json_value(value),
+                handle,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
 
 
 class RunReporter:

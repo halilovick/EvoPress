@@ -2,6 +2,31 @@
 
 from __future__ import annotations
 
+import hashlib
+import struct
+
+import torch
+
+
+def calibration_token_digest(samples) -> str:
+    """Hash ordered token tensors, including dtype, shape, and sample boundaries."""
+
+    digest = hashlib.sha256()
+    digest.update(b"evopress-calibration-token-digest-v1\0")
+    for sample in samples:
+        if not isinstance(sample, torch.Tensor):
+            raise TypeError(
+                "Calibration-token digest expects a sequence of torch.Tensor values."
+            )
+        tensor = sample.detach().to(device="cpu").contiguous()
+        dtype_name = str(tensor.dtype).encode("ascii")
+        digest.update(struct.pack("<I", len(dtype_name)))
+        digest.update(dtype_name)
+        digest.update(struct.pack("<I", tensor.ndim))
+        for dimension in tensor.shape:
+            digest.update(struct.pack("<Q", int(dimension)))
+        digest.update(tensor.numpy().tobytes(order="C"))
+    return digest.hexdigest()
 
 def configured_calibration_partition(
     total_sequences: int,

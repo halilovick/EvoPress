@@ -13,6 +13,16 @@
     "sequence_length": 8192,
     "quantizable_modules": ".*layers.*((q|k|v|o|gate|up|down)_proj)$",
     "expected_modules": 224,
+    "expected_reconstruction_dtype": "float16",
+    "expected_reconstruction_shapes": {
+      "q_proj": [4096, 4096],
+      "k_proj": [1024, 4096],
+      "v_proj": [1024, 4096],
+      "o_proj": [4096, 4096],
+      "gate_proj": [14336, 4096],
+      "up_proj": [14336, 4096],
+      "down_proj": [4096, 14336]
+    },
     "bitwidths": [2, 3, 4, 5, 6],
     "calibration_bitwidth": 3,
     "group_size": 128,
