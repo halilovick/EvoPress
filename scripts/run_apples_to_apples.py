@@ -179,7 +179,7 @@ def prepare_db_storage_preflight(
     database_storage = _storage_snapshot(quant_db.parent)
     if (
         database_storage["total_inodes"] > 0
-        and database_storage["free_inodes"] < MIN_PREPARE_DB_FREE_INODES
+        and 0 <= database_storage["free_inodes"] < MIN_PREPARE_DB_FREE_INODES
     ):
         raise OSError(
             "Insufficient free inodes for quantization database generation: "
@@ -212,7 +212,7 @@ def prepare_db_storage_preflight(
     cache_storage = _storage_snapshot(resolved_cache.parent)
     if (
         cache_storage["total_inodes"] > 0
-        and cache_storage["free_inodes"] < MIN_PREPARE_DB_FREE_INODES
+        and 0 <= cache_storage["free_inodes"] < MIN_PREPARE_DB_FREE_INODES
     ):
         raise OSError(
             "Insufficient free inodes for the activation cache: "
