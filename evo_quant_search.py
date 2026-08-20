@@ -26,6 +26,7 @@ from src.compression_budget import (
     validate_exact_budget,
 )
 from src.metrics import compute_perplexity, compute_kl_div, compute_sparse_kl_div
+from src.teacher_logits_cache import DiskTensorCache
 from src.model_utils import (
     get_attn_layer_name,
     get_layers,
@@ -374,10 +375,22 @@ def main():
     }
     target_logits = []
     if args.fitness_fn == "kl":
-        # Compute target logits (calibration)
-        for i in trange(0, len(calibration_data), desc="Computing target logits (calib)", leave=False):
+        # Dense KL is unchanged mathematically. Only storage changes: each
+        # teacher-logit tensor is serialized losslessly and released from RAM.
+        target_logits = DiskTensorCache.temporary(
+            prefix="evopress-quant-teacher-logits",
+        )
+        print(f"Dense teacher logits cache: {target_logits.root}")
+        for i in trange(
+            0,
+            len(calibration_data),
+            desc="Computing target logits (calib)",
+            leave=False,
+        ):
             with torch.no_grad():
-                target_logits.append(model(calibration_data[i].to(device)).logits.cpu())
+                target_logits.append(
+                    model(calibration_data[i].to(device)).logits
+                )
 
     elif args.fitness_fn == "sparse_kl":
         # Compute target logits (calibration)

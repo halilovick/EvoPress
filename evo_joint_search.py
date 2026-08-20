@@ -23,6 +23,7 @@ from src.compression_budget import (
 )
 from src.data_utils import get_data
 from src.metrics import compute_kl_div, compute_perplexity
+from src.teacher_logits_cache import DiskTensorCache
 from src.model_utils import (
     dummy_initialize,
     get_attn_layer_name,
@@ -1324,9 +1325,22 @@ def main():
 
     target_logits = []
     if args.fitness_fn == "kl":
-        for i in trange(0, len(calibration_data), desc="Computing target logits (calib)", leave=False):
+        # Preserve full dense-teacher KL while keeping the ~32 GiB teacher
+        # logits outside the 16 GiB CPU-memory cgroup.
+        target_logits = DiskTensorCache.temporary(
+            prefix="evopress-joint-teacher-logits",
+        )
+        print(f"Dense teacher logits cache: {target_logits.root}")
+        for i in trange(
+            0,
+            len(calibration_data),
+            desc="Computing target logits (calib)",
+            leave=False,
+        ):
             with torch.no_grad():
-                target_logits.append(model(calibration_data[i].to(device)).logits.cpu())
+                target_logits.append(
+                    model(calibration_data[i].to(device)).logits
+                )
 
     # Prepare depth-pruning part.
     layers = get_layers(model)

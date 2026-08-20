@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 
 from src.common_utils import to
+from src.teacher_logits_cache import materialize_tensor_reference
 from src.model_utils import Catcher, CatcherExit, get_layers, get_lm_head, get_lm_logits
 
 
@@ -56,7 +57,17 @@ def compute_kl_div(model, data, target_logits, batch_size: int = 1):
         j = min(i + batch_size, num_samples)
        
         inputs = torch.cat(data[i:j]).to(device)
-        targets = torch.cat(target_logits[i:j]).to(device)
+        target_items = [
+            materialize_tensor_reference(item)
+            for item in target_logits[i:j]
+        ]
+        target_cpu = (
+            target_items[0]
+            if len(target_items) == 1
+            else torch.cat(target_items)
+        )
+        targets = target_cpu.to(device)
+        del target_items, target_cpu
         # Forward pass through the model
         lm_logits = model(inputs).logits
 
