@@ -502,6 +502,7 @@ class RunReporter:
         self.repo_root = repo_root
         self.timestamp_start = utc_now()
         self.start_monotonic = time.monotonic()
+        self.runtime_offset_seconds = 0.0
         self.run_name = self.output_dir.name if self.output_dir is not None else None
         self.generation_log_path = (
             self.output_dir / "generation_log.csv" if self.output_dir is not None else None
@@ -510,8 +511,18 @@ class RunReporter:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             reset_peak_gpu_memory()
 
+    def set_runtime_offset_seconds(self, value: float) -> None:
+        value = float(value)
+        if value < 0:
+            raise ValueError("Runtime offset must be non-negative.")
+        self.runtime_offset_seconds = value
+
     def runtime_seconds(self) -> float:
-        return time.monotonic() - self.start_monotonic
+        return (
+            self.runtime_offset_seconds
+            + time.monotonic()
+            - self.start_monotonic
+        )
 
     def append_generation(self, row: Mapping[str, Any]) -> None:
         if not self.enabled or self.generation_log_path is None:

@@ -24,6 +24,12 @@ from src.compression_budget import (
 from src.data_utils import get_data
 from src.metrics import compute_kl_div, compute_perplexity
 from src.teacher_logits_cache import DiskTensorCache
+from src.search_checkpoint import (
+    load_search_checkpoint,
+    restore_rng_state,
+    save_search_checkpoint,
+    validate_checkpoint_identity,
+)
 from src.model_utils import (
     dummy_initialize,
     get_attn_layer_name,
@@ -1086,6 +1092,15 @@ def parse_args(argv=None):
 
     parser.add_argument("--output_dir", default="./outputs/joint_search_tiny")
     parser.add_argument(
+        "--resume_checkpoint",
+        type=str,
+        default=None,
+        help=(
+            "Resume from a generation-level search_checkpoint.pt. "
+            "Model/data/teacher logits are rebuilt before RNG/search state is restored."
+        ),
+    )
+    parser.add_argument(
         "--sequential_mode",
         default="none",
         choices=SEQUENTIAL_MODES,
@@ -1728,7 +1743,240 @@ def main():
     offspring_attempts_total = 0
     candidate_evaluations_search_cumulative = initial_candidate_evaluations
     evaluation_tokens_search_cumulative = initial_evaluation_tokens
-    for generation in range(args.generations):
+
+    checkpoint_identity = {
+        "model_name_or_path": args.model_name_or_path,
+        "quant_weights_path": os.path.realpath(args.quant_weights_path),
+        "seed": args.seed,
+        "generations": args.generations,
+        "offspring": args.offspring,
+        "survivors_per_selection": list(args.survivors_per_selection),
+        "effective_survivors_per_selection": list(
+            effective_selection_survivors
+        ),
+        "tokens_per_selection": list(args.tokens_per_selection),
+        "fitness_fn": args.fitness_fn,
+        "target_bitwidth": float(args.target_bitwidth),
+        "drop_sparsity": float(args.drop_sparsity),
+        "drop_entire_block": bool(args.drop_entire_block),
+        "group_rule": args.group_rule,
+        "step_size": args.step_size,
+        "compression_budget_mode": args.compression_budget_mode,
+        "quantization_group_size": args.quantization_group_size,
+        "active_quant_budget": bool(args.active_quant_budget),
+        "joint_mutation_mode": args.joint_mutation_mode,
+        "joint_aware_mutation": bool(args.joint_aware_mutation),
+        "joint_aware_probability": float(args.joint_aware_probability),
+        "adaptive_mutation": bool(args.adaptive_mutation),
+        "adaptive_mutation_patience": args.adaptive_mutation_patience,
+        "adaptive_mutation_max_strength": args.adaptive_mutation_max_strength,
+        "coarse_to_fine_mutation": bool(args.coarse_to_fine_mutation),
+        "coarse_to_fine_start_strength": args.coarse_to_fine_start_strength,
+        "coarse_to_fine_end_strength": args.coarse_to_fine_end_strength,
+        "max_drop_mutations": args.max_drop_mutations,
+        "population_size": args.population_size,
+        "crossover_probability": float(args.crossover_probability),
+        "crossover_type": args.crossover_type,
+        "sequential_mode": args.sequential_mode,
+        "stage1_run_dir": (
+            os.path.realpath(args.stage1_run_dir)
+            if args.stage1_run_dir is not None
+            else None
+        ),
+        "stage1_candidate": (
+            os.path.realpath(args.stage1_candidate)
+            if args.stage1_candidate is not None
+            else None
+        ),
+        "sequential_quant_initialization_policy": (
+            args.sequential_quant_initialization_policy
+        ),
+        "expected_target_cost_bits": args.expected_target_cost_bits,
+        "grouped_layer_names": [
+            list(group)
+            for group in grouped_layer_names
+        ],
+    }
+
+    checkpoint_path = os.path.join(
+        args.output_dir,
+        "search_checkpoint.pt",
+    )
+    resume_source_checkpoint = None
+    resumed_from_generation = 0
+    start_generation = 0
+
+    if args.resume_checkpoint is not None:
+        resume_source_checkpoint = os.path.realpath(
+            args.resume_checkpoint
+        )
+        checkpoint = load_search_checkpoint(
+            resume_source_checkpoint,
+            expected_search_type="joint_depth_quant",
+        )
+        validate_checkpoint_identity(
+            checkpoint,
+            checkpoint_identity,
+        )
+
+        state = checkpoint["state"]
+
+        initial_candidates = copy.deepcopy(
+            state["initial_candidates"]
+        )
+        initialization_attempts = int(
+            state["initialization_attempts"]
+        )
+        initial_repair_changed_gene_names = copy.deepcopy(
+            state["initial_repair_changed_gene_names"]
+        )
+        initial_parent = copy.deepcopy(
+            state["initial_parent"]
+        )
+        initial_fixed_quant_legal_swap_count = state[
+            "initial_fixed_quant_legal_swap_count"
+        ]
+
+        population = copy.deepcopy(state["population"])
+        train_fitnesses = [
+            float(value)
+            for value in state["train_fitnesses"]
+        ]
+        validate_persistent_population(
+            population,
+            args.population_size,
+            context="resumed population",
+        )
+        parent = population[0]
+        train_fitness = train_fitnesses[0]
+
+        initial_candidate_evaluations = int(
+            state["initial_candidate_evaluations"]
+        )
+        initial_evaluation_tokens = int(
+            state["initial_evaluation_tokens"]
+        )
+        stagnation_generations = int(
+            state["stagnation_generations"]
+        )
+        crossover_offspring_attempted_total = int(
+            state["crossover_offspring_attempted_total"]
+        )
+        crossover_offspring_accepted_total = int(
+            state["crossover_offspring_accepted_total"]
+        )
+        crossover_repair_changed_gene_count_total = int(
+            state["crossover_repair_changed_gene_count_total"]
+        )
+        mutation_offspring_accepted_total = int(
+            state["mutation_offspring_accepted_total"]
+        )
+        offspring_attempts_total = int(
+            state["offspring_attempts_total"]
+        )
+        candidate_evaluations_search_cumulative = int(
+            state["candidate_evaluations_search_cumulative"]
+        )
+        evaluation_tokens_search_cumulative = int(
+            state["evaluation_tokens_search_cumulative"]
+        )
+
+        start_generation = int(
+            checkpoint["completed_generation"]
+        )
+        resumed_from_generation = start_generation
+
+        if not 0 <= start_generation <= args.generations:
+            raise ValueError(
+                "Checkpoint completed generation is outside the configured "
+                f"range: {start_generation}/{args.generations}."
+            )
+
+        if exact_total_budget:
+            resumed_cost = candidate_compression_cost(
+                model,
+                parent,
+                grouped_layer_names=grouped_layer_names,
+                **budget_cost_kwargs,
+            )
+            validate_exact_budget(
+                resumed_cost,
+                target_cost_bits,
+                context="resumed joint parent",
+            )
+
+        reporter.set_runtime_offset_seconds(
+            float(state["runtime_seconds_cumulative"])
+        )
+
+        # Startup can consume RNG; restore only after all deterministic rebuild
+        # work and resume validation is complete.
+        restore_rng_state(checkpoint["rng_state"])
+
+        print(
+            "Resuming joint search from completed generation "
+            f"{start_generation}; next generation is "
+            f"{start_generation + 1 if start_generation < args.generations else 'final evaluation'}."
+        )
+
+    def joint_checkpoint_state():
+        return {
+            "initial_candidates": copy.deepcopy(initial_candidates),
+            "initialization_attempts": int(initialization_attempts),
+            "initial_repair_changed_gene_names": copy.deepcopy(
+                initial_repair_changed_gene_names
+            ),
+            "initial_parent": copy.deepcopy(initial_parent),
+            "initial_fixed_quant_legal_swap_count": (
+                initial_fixed_quant_legal_swap_count
+            ),
+            "population": copy.deepcopy(population),
+            "train_fitnesses": [
+                float(value)
+                for value in train_fitnesses
+            ],
+            "initial_candidate_evaluations": int(
+                initial_candidate_evaluations
+            ),
+            "initial_evaluation_tokens": int(
+                initial_evaluation_tokens
+            ),
+            "stagnation_generations": int(stagnation_generations),
+            "crossover_offspring_attempted_total": int(
+                crossover_offspring_attempted_total
+            ),
+            "crossover_offspring_accepted_total": int(
+                crossover_offspring_accepted_total
+            ),
+            "crossover_repair_changed_gene_count_total": int(
+                crossover_repair_changed_gene_count_total
+            ),
+            "mutation_offspring_accepted_total": int(
+                mutation_offspring_accepted_total
+            ),
+            "offspring_attempts_total": int(
+                offspring_attempts_total
+            ),
+            "candidate_evaluations_search_cumulative": int(
+                candidate_evaluations_search_cumulative
+            ),
+            "evaluation_tokens_search_cumulative": int(
+                evaluation_tokens_search_cumulative
+            ),
+            "runtime_seconds_cumulative": float(
+                reporter.runtime_seconds()
+            ),
+        }
+
+    save_search_checkpoint(
+        checkpoint_path,
+        search_type="joint_depth_quant",
+        completed_generation=start_generation,
+        identity=checkpoint_identity,
+        state=joint_checkpoint_state(),
+    )
+
+    for generation in range(start_generation, args.generations):
         generation_population = copy.deepcopy(population)
         generation_parent = copy.deepcopy(parent)
         generation_train_fitness = train_fitness
@@ -2388,6 +2636,14 @@ def main():
             }
         )
 
+        save_search_checkpoint(
+            checkpoint_path,
+            search_type="joint_depth_quant",
+            completed_generation=generation + 1,
+            identity=checkpoint_identity,
+            state=joint_checkpoint_state(),
+        )
+
     final_depth_counts_valid = validate_depth_counts(
         parent["drop"],
         total_blocks,
@@ -2570,6 +2826,8 @@ def main():
             "eval_tokens_loaded_by_dataset": eval_tokens_by_dataset,
             "eval_every": args.eval_every,
             "seed": args.seed,
+            "resume_source_checkpoint": resume_source_checkpoint,
+            "resumed_from_generation": resumed_from_generation,
             "sequential_mode": args.sequential_mode,
             "max_initialization_attempts": args.max_initialization_attempts,
             "max_offspring_attempts": args.max_offspring_attempts,

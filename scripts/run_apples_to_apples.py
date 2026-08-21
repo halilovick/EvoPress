@@ -894,6 +894,7 @@ def build_command(
     database_memory_mode: str = "legacy_cpu_offload",
     activation_cache_dir: Path | None = None,
     attempt_id: str | None = None,
+    resume_checkpoint: Path | None = None,
 ) -> list[str]:
     database = config["quant_database"]
     search = config["search"]
@@ -1011,6 +1012,10 @@ def build_command(
         command += ["--initially_generated", str(search["quant_initial_candidates"])]
         if search["skip_quant_uniform_initial_evaluation"]:
             command.append("--skip_initial_uniform_evaluation")
+        if resume_checkpoint is not None:
+            command.extend(
+                ["--resume_checkpoint", str(resume_checkpoint)]
+            )
         return command
     if method == "joint":
         command = [python_bin, "evo_joint_search.py", *common]
@@ -1032,6 +1037,10 @@ def build_command(
             command.append("--drop_entire_block")
         if search.get("skip_joint_single_initial_evaluation", False):
             command.append("--skip_initial_single_candidate_evaluation")
+        if resume_checkpoint is not None:
+            command.extend(
+                ["--resume_checkpoint", str(resume_checkpoint)]
+            )
         return command
     raise ValueError(f"Unsupported method: {method}")
 
@@ -1600,11 +1609,31 @@ def main() -> int:
         help="New, non-existing scratch path required by disk_activation_cache mode.",
     )
     parser.add_argument("--allow-unmanifested-db", action="store_true")
+    parser.add_argument(
+        "--resume-checkpoint",
+        type=Path,
+        default=None,
+        help=(
+            "Checkpoint from an interrupted quant_only or joint run. "
+            "The resumed search is written into a fresh run directory."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     if args.quant_db is not None and args.quant_db_root is not None:
         parser.error("Use only one of --quant-db and --quant-db-root.")
+
+    if args.resume_checkpoint is not None:
+        if args.method not in {"quant_only", "joint"}:
+            parser.error(
+                "--resume-checkpoint is valid only for quant_only or joint."
+            )
+        if not args.resume_checkpoint.is_file():
+            parser.error(
+                "--resume-checkpoint does not exist or is not a file: "
+                f"{args.resume_checkpoint}"
+            )
     if args.method == "prepare_db" and args.quant_db is not None:
         parser.error(
             "prepare_db accepts --quant-db-root, not --quant-db; the final target "
@@ -1649,6 +1678,11 @@ def main() -> int:
         if args.activation_cache_dir is not None
         else None
     )
+    resume_checkpoint = (
+        args.resume_checkpoint.resolve()
+        if args.resume_checkpoint is not None
+        else None
+    )
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     run_id = args.run_id or f"{args.method}_seed{args.seed}_{timestamp}"
     if (
@@ -1682,6 +1716,7 @@ def main() -> int:
         args.database_memory_mode,
         activation_cache_dir,
         attempt_id,
+        resume_checkpoint,
     )
     if args.dry_run:
         print(f"profile={config['profile']}")
@@ -1797,6 +1832,11 @@ def main() -> int:
             "activation_cache_dir": (
                 str(activation_cache_dir)
                 if activation_cache_dir is not None
+                else None
+            ),
+            "resume_checkpoint": (
+                str(resume_checkpoint)
+                if resume_checkpoint is not None
                 else None
             ),
         },

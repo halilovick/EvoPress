@@ -27,6 +27,12 @@ from src.compression_budget import (
 )
 from src.metrics import compute_perplexity, compute_kl_div, compute_sparse_kl_div
 from src.teacher_logits_cache import DiskTensorCache
+from src.search_checkpoint import (
+    load_search_checkpoint,
+    restore_rng_state,
+    save_search_checkpoint,
+    validate_checkpoint_identity,
+)
 from src.model_utils import (
     get_attn_layer_name,
     get_layers,
@@ -278,6 +284,15 @@ def parse_args():
         type=str,
         default=None,
         help="Directory for structured run_summary.json, generation_log.csv, and final_candidate.json.",
+    )
+    parser.add_argument(
+        "--resume_checkpoint",
+        type=str,
+        default=None,
+        help=(
+            "Resume from a generation-level search_checkpoint.pt. "
+            "Model/data/teacher logits are rebuilt before RNG/search state is restored."
+        ),
     )
     args = parser.parse_args()
     return args
@@ -570,7 +585,148 @@ def main():
     offspring_attempts_total = 0
     candidate_evaluations_search_cumulative = initial_candidate_evaluations
     evaluation_tokens_search_cumulative = initial_evaluation_tokens
-    for generation in range(args.generations):
+
+    checkpoint_identity = {
+        "model_name_or_path": args.model_name_or_path,
+        "quant_weights_path": os.path.realpath(args.quant_weights_path),
+        "seed": args.seed,
+        "generations": args.generations,
+        "offspring": args.offspring,
+        "survivors_per_selection": list(args.survivors_per_selection),
+        "tokens_per_selection": list(args.tokens_per_selection),
+        "fitness_fn": args.fitness_fn,
+        "target_bitwidth": float(args.target_bitwidth),
+        "group_rule": args.group_rule,
+        "step_size": args.step_size,
+        "compression_budget_mode": args.compression_budget_mode,
+        "quantization_group_size": args.quantization_group_size,
+        "expected_target_cost_bits": args.expected_target_cost_bits,
+        "grouped_layer_names": [
+            list(group)
+            for group in grouped_layer_names
+        ],
+    }
+
+    checkpoint_path = (
+        os.path.join(args.output_dir, "search_checkpoint.pt")
+        if args.output_dir is not None
+        else None
+    )
+    resume_source_checkpoint = None
+    resumed_from_generation = 0
+    start_generation = 0
+
+    if args.resume_checkpoint is not None:
+        if args.output_dir is None:
+            raise ValueError(
+                "--resume_checkpoint requires --output_dir so new checkpoints "
+                "can be persisted."
+            )
+
+        resume_source_checkpoint = os.path.realpath(
+            args.resume_checkpoint
+        )
+        checkpoint = load_search_checkpoint(
+            resume_source_checkpoint,
+            expected_search_type="quant_only",
+        )
+        validate_checkpoint_identity(
+            checkpoint,
+            checkpoint_identity,
+        )
+
+        state = checkpoint["state"]
+        parent = copy.deepcopy(state["parent"])
+        train_fitness = float(state["train_fitness"])
+        initial_candidate_evaluations = int(
+            state["initial_candidate_evaluations"]
+        )
+        initial_evaluation_tokens = int(
+            state["initial_evaluation_tokens"]
+        )
+        offspring_attempts_total = int(
+            state["offspring_attempts_total"]
+        )
+        candidate_evaluations_search_cumulative = int(
+            state["candidate_evaluations_search_cumulative"]
+        )
+        evaluation_tokens_search_cumulative = int(
+            state["evaluation_tokens_search_cumulative"]
+        )
+
+        start_generation = int(
+            checkpoint["completed_generation"]
+        )
+        resumed_from_generation = start_generation
+
+        if not 0 <= start_generation <= args.generations:
+            raise ValueError(
+                "Checkpoint completed generation is outside the configured "
+                f"range: {start_generation}/{args.generations}."
+            )
+
+        if exact_total_budget:
+            resumed_cost = candidate_compression_cost(
+                model,
+                parent,
+                grouped_layer_names=grouped_layer_names,
+                **budget_cost_kwargs,
+            )
+            validate_exact_budget(
+                resumed_cost,
+                exact_target_cost_bits,
+                context="resumed quantization-only parent",
+            )
+
+        reporter.set_runtime_offset_seconds(
+            float(state["runtime_seconds_cumulative"])
+        )
+
+        # Restore only after all model/data/cache/startup work has finished.
+        restore_rng_state(checkpoint["rng_state"])
+
+        print(
+            "Resuming quantization search from completed generation "
+            f"{start_generation}; next generation is "
+            f"{start_generation + 1 if start_generation < args.generations else 'final evaluation'}."
+        )
+
+    def quant_checkpoint_state():
+        return {
+            "parent": copy.deepcopy(parent),
+            "train_fitness": float(train_fitness),
+            "initial_candidate_evaluations": int(
+                initial_candidate_evaluations
+            ),
+            "initial_evaluation_tokens": int(
+                initial_evaluation_tokens
+            ),
+            "offspring_attempts_total": int(
+                offspring_attempts_total
+            ),
+            "candidate_evaluations_search_cumulative": int(
+                candidate_evaluations_search_cumulative
+            ),
+            "evaluation_tokens_search_cumulative": int(
+                evaluation_tokens_search_cumulative
+            ),
+            "runtime_seconds_cumulative": float(
+                reporter.runtime_seconds()
+            ),
+        }
+
+    if checkpoint_path is not None:
+        # Generation 0 is useful too: a crash during the first generation can
+        # restart from the exact post-initialization RNG/search state.
+        save_search_checkpoint(
+            checkpoint_path,
+            search_type="quant_only",
+            completed_generation=start_generation,
+            identity=checkpoint_identity,
+            state=quant_checkpoint_state(),
+        )
+
+    for generation in range(start_generation, args.generations):
         generation_parent = copy.deepcopy(parent)
         generation_train_fitness = train_fitness
         parent_bits = 0
@@ -866,6 +1022,16 @@ def main():
                 "peak_gpu_memory_mb": peak_gpu_memory()[0],
             }
         )
+
+        if checkpoint_path is not None:
+            save_search_checkpoint(
+                checkpoint_path,
+                search_type="quant_only",
+                completed_generation=generation + 1,
+                identity=checkpoint_identity,
+                state=quant_checkpoint_state(),
+            )
+
     # Save final configuration
     configuration_name = args.configuration_name or f"evo-{args.fitness_fn}-configuration-{args.target_bitwidth}.txt"
     configuration_path = (
@@ -953,6 +1119,8 @@ def main():
             "eval_tokens_loaded_by_dataset": eval_tokens_by_dataset,
             "eval_every": args.eval_every,
             "seed": args.seed,
+            "resume_source_checkpoint": resume_source_checkpoint,
+            "resumed_from_generation": resumed_from_generation,
             "skip_initial_uniform_evaluation": args.skip_initial_uniform_evaluation,
             "initial_candidate_evaluations": initial_candidate_evaluations,
             "initial_evaluation_tokens": initial_evaluation_tokens,
@@ -1041,6 +1209,8 @@ def main():
                 configuration_path
             ),
             "stdout_log_path": os.path.join(output_dir, "run.log") if output_dir else None,
+            "checkpoint_path": checkpoint_path,
+            "resume_source_checkpoint": resume_source_checkpoint,
         },
     )
 
