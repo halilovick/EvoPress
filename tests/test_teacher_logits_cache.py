@@ -1,6 +1,8 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from types import SimpleNamespace
 
 import torch
@@ -89,10 +91,20 @@ class TeacherLogitsCacheTest(unittest.TestCase):
             for tensor in in_memory_targets:
                 cache.append(tensor)
 
-            disk_backed_kl = compute_kl_div(
-                student,
-                calibration_data,
-                cache,
+            with mock.patch.object(
+                DiskTensorRef,
+                "evict_file_cache",
+                autospec=True,
+            ) as evict_file_cache:
+                disk_backed_kl = compute_kl_div(
+                    student,
+                    calibration_data,
+                    cache,
+                )
+
+            self.assertEqual(
+                evict_file_cache.call_count,
+                len(calibration_data),
             )
 
         self.assertGreater(in_memory_kl, 0.0)
@@ -101,6 +113,33 @@ class TeacherLogitsCacheTest(unittest.TestCase):
             in_memory_kl,
             places=7,
         )
+
+    def test_evict_file_cache_uses_posix_dontneed_when_available(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "tensor.pth"
+            torch.save(torch.ones(4), path)
+            ref = DiskTensorRef(path)
+
+            with (
+                mock.patch.object(
+                    os,
+                    "posix_fadvise",
+                    create=True,
+                ) as posix_fadvise,
+                mock.patch.object(
+                    os,
+                    "POSIX_FADV_DONTNEED",
+                    4,
+                    create=True,
+                ),
+            ):
+                ref.evict_file_cache()
+
+            self.assertEqual(posix_fadvise.call_count, 1)
+            _, offset, length, advice = posix_fadvise.call_args.args
+            self.assertEqual(offset, 0)
+            self.assertEqual(length, 0)
+            self.assertEqual(advice, 4)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,11 @@ import torch
 import torch.nn.functional as F
 
 from src.common_utils import to
-from src.teacher_logits_cache import materialize_tensor_reference
+from src.teacher_logits_cache import (
+    evict_tensor_reference_file_cache,
+    materialize_tensor_reference,
+)
+from src.memory_utils import release_cpu_memory
 from src.model_utils import Catcher, CatcherExit, get_layers, get_lm_head, get_lm_logits
 
 
@@ -57,9 +61,10 @@ def compute_kl_div(model, data, target_logits, batch_size: int = 1):
         j = min(i + batch_size, num_samples)
        
         inputs = torch.cat(data[i:j]).to(device)
+        target_refs = target_logits[i:j]
         target_items = [
             materialize_tensor_reference(item)
-            for item in target_logits[i:j]
+            for item in target_refs
         ]
         target_cpu = (
             target_items[0]
@@ -96,6 +101,15 @@ def compute_kl_div(model, data, target_logits, batch_size: int = 1):
             tokens_processed += shift_targets_batch.numel()
             del shift_logits_batch, shift_targets_batch, loss_batch
             torch.cuda.empty_cache()      
+
+        # All computations using this teacher batch are complete. Release any
+        # mmap-backed CPU tensor/storage, then tell Linux those file pages are
+        # not useful for page cache. This keeps the 32 GiB teacher cache from
+        # competing with the 16 GiB cgroup memory limit.
+        del inputs, targets, lm_logits, shift_logits, shift_targets
+        release_cpu_memory()
+        for target_ref in target_refs:
+            evict_tensor_reference_file_cache(target_ref)
         
  
     return kl_div_running.item()

@@ -51,6 +51,31 @@ class DiskTensorRef:
 
         return tensor
 
+    def evict_file_cache(self) -> None:
+        """Hint that cached pages for this tensor file are no longer needed."""
+
+        if not (
+            hasattr(os, "posix_fadvise")
+            and hasattr(os, "POSIX_FADV_DONTNEED")
+        ):
+            return
+
+        file_descriptor = None
+        try:
+            file_descriptor = os.open(self.path, os.O_RDONLY)
+            os.posix_fadvise(
+                file_descriptor,
+                0,
+                0,
+                os.POSIX_FADV_DONTNEED,
+            )
+        except OSError:
+            # Some overlay/network filesystems may not support the hint.
+            pass
+        finally:
+            if file_descriptor is not None:
+                os.close(file_descriptor)
+
 
 def materialize_tensor_reference(value: Any) -> Any:
     """Materialize a lazy disk tensor reference; pass ordinary values through."""
@@ -58,6 +83,13 @@ def materialize_tensor_reference(value: Any) -> Any:
     if isinstance(value, DiskTensorRef):
         return value.load()
     return value
+
+
+def evict_tensor_reference_file_cache(value: Any) -> None:
+    """Evict file-backed pages for a materialized lazy tensor reference."""
+
+    if isinstance(value, DiskTensorRef):
+        value.evict_file_cache()
 
 
 class DiskTensorCache(Sequence[DiskTensorRef]):
