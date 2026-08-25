@@ -6,7 +6,7 @@ from unittest import mock
 
 import torch
 
-from src.io_utils import torch_save
+from src.io_utils import torch_load_tensor, torch_save
 
 
 class TorchSaveTest(unittest.TestCase):
@@ -49,6 +49,41 @@ class TorchSaveTest(unittest.TestCase):
                 expected = hashlib.sha256(handle.read()).hexdigest()
 
         self.assertEqual(digest, expected)
+
+    def test_tensor_loader_preserves_tensor_exactly(self):
+        tensor = torch.randn(8, 16, dtype=torch.float16)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "tensor.pth")
+            torch.save(tensor, path)
+
+            loaded = torch_load_tensor(
+                path,
+                device="cpu",
+                dtype=torch.float16,
+            )
+
+        self.assertTrue(torch.equal(tensor, loaded))
+
+    def test_tensor_loader_evicts_read_file_cache(self):
+        tensor = torch.tensor([1.0, 2.0], dtype=torch.float16)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "tensor.pth")
+            torch.save(tensor, path)
+
+            with mock.patch(
+                "src.io_utils.drop_file_cache_for_path"
+            ) as drop_file_cache:
+                loaded = torch_load_tensor(
+                    path,
+                    device="cpu",
+                    dtype=torch.float16,
+                    drop_file_cache=True,
+                )
+
+        drop_file_cache.assert_called_once_with(path)
+        self.assertTrue(torch.equal(tensor, loaded))
 
 
 if __name__ == "__main__":

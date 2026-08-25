@@ -19,6 +19,7 @@ except ModuleNotFoundError:
 
 from src.data_utils import get_data
 from src.common_utils import fix_seed
+from src.io_utils import torch_load_tensor
 from src.compression_budget import (
     candidate_compression_cost,
     inspect_quantization_database,
@@ -64,9 +65,17 @@ def load_layers(
         for layer_name, new_level, old_level in zip(grouped_layer_names[i], new_state[i], model.state[i]):
             if new_level != old_level:
                 layer = model.get_submodule(layer_name)
-                layer.weight.data = torch.load(
-                    os.path.join(quant_weights_path, layer_name, f"{new_level}.pth"), map_location=layer.weight.device
-                ).to(layer.weight.dtype)
+                weight_path = os.path.join(
+                    quant_weights_path,
+                    layer_name,
+                    f"{new_level}.pth",
+                )
+                layer.weight.data = torch_load_tensor(
+                    weight_path,
+                    device=layer.weight.device,
+                    dtype=layer.weight.dtype,
+                    drop_file_cache=True,
+                )
     # Update model state
     model.state = new_state
 

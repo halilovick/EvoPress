@@ -22,6 +22,7 @@ from src.compression_budget import (
     validate_exact_budget,
 )
 from src.data_utils import get_data
+from src.io_utils import torch_load_tensor
 from src.metrics import compute_kl_div, compute_perplexity
 from src.teacher_logits_cache import DiskTensorCache
 from src.search_checkpoint import (
@@ -124,8 +125,17 @@ def load_quant_layers(
         ):
             if new_level != old_level:
                 layer = model.get_submodule(layer_name)
-                weight_path = os.path.join(quant_weights_path, layer_name, f"{new_level}.pth")
-                layer.weight.data = torch.load(weight_path, map_location=layer.weight.device).to(layer.weight.dtype)
+                weight_path = os.path.join(
+                    quant_weights_path,
+                    layer_name,
+                    f"{new_level}.pth",
+                )
+                layer.weight.data = torch_load_tensor(
+                    weight_path,
+                    device=layer.weight.device,
+                    dtype=layer.weight.dtype,
+                    drop_file_cache=True,
+                )
 
     model.state = copy.deepcopy(new_state)
 
