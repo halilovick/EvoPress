@@ -36,7 +36,47 @@ class RunJointSearchTinyTest(unittest.TestCase):
             self.assertIn("--population_size 1", result.stdout)
             self.assertIn("--crossover_probability 0.0", result.stdout)
             self.assertIn("--crossover_type component", result.stdout)
+            self.assertIn("--crossover_parent_selection uniform", result.stdout)
             self.assertFalse(output_dir.exists())
+
+    def test_default_run_ids_distinguish_matrix_conditions(self) -> None:
+        conditions = [
+            ({"POPULATION_SIZE": "1", "CROSSOVER_PROBABILITY": "0.0"}, "joint_g20_mutation_pop1_seed0"),
+            ({"POPULATION_SIZE": "4", "CROSSOVER_PROBABILITY": "0.0"}, "joint_g20_population_pop4_seed0"),
+            (
+                {
+                    "POPULATION_SIZE": "4",
+                    "CROSSOVER_PROBABILITY": "0.25",
+                    "CROSSOVER_TYPE": "component",
+                },
+                "joint_g20_component_xover_pop4_seed0",
+            ),
+            (
+                {
+                    "POPULATION_SIZE": "4",
+                    "CROSSOVER_PROBABILITY": "0.25",
+                    "CROSSOVER_TYPE": "layer_bundle",
+                },
+                "joint_g20_layerbundle_xover_pop4_seed0",
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for condition, expected_run_id in conditions:
+                with self.subTest(expected_run_id=expected_run_id):
+                    result = self.run_command(
+                        [str(LAUNCHER), "--dry-run"],
+                        {
+                            **condition,
+                            "GENERATIONS": "20",
+                            "OUTPUTS_ROOT": temp_dir,
+                            "OUTPUT_DIR": "",
+                            "RUN_ID": "",
+                        },
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(
+                        f"output_dir={temp_dir}/{expected_run_id}", result.stdout
+                    )
 
     def test_dry_run_supports_component_crossover(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -55,6 +95,25 @@ class RunJointSearchTinyTest(unittest.TestCase):
             self.assertIn("--population_size 4", result.stdout)
             self.assertIn("--crossover_probability 0.25", result.stdout)
             self.assertIn("--crossover_type component", result.stdout)
+            self.assertFalse(output_dir.exists())
+
+    def test_dry_run_supports_layer_bundle_crossover(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "outputs" / "joint"
+            result = self.run_command(
+                [str(LAUNCHER), "--dry-run"],
+                {
+                    "OUTPUT_DIR": str(output_dir),
+                    "POPULATION_SIZE": "4",
+                    "CROSSOVER_PROBABILITY": "0.25",
+                    "CROSSOVER_TYPE": "layer_bundle",
+                    "CROSSOVER_PARENT_SELECTION": "diversity",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--crossover_type layer_bundle", result.stdout)
+            self.assertIn("--crossover_parent_selection diversity", result.stdout)
             self.assertFalse(output_dir.exists())
 
     def test_crossover_rejects_sequential_mode_without_side_effects(self) -> None:

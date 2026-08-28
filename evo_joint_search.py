@@ -310,16 +310,45 @@ def add_persistent_parents_for_elitism(
     return final_candidates, final_metadata
 
 
-def select_distinct_parents(population):
+def joint_genotype_distance(candidate_a, candidate_b) -> int:
+    """Cheap Hamming distance over the represented depth and quant genes."""
+    depth_distance = count_drop_state_changes(
+        candidate_a["drop"], candidate_b["drop"]
+    )
+    quant_distance = count_quant_state_changes(
+        candidate_a["quant"], candidate_b["quant"]
+    )
+    return depth_distance + quant_distance
+
+
+def select_distinct_parents(population, parent_selection="uniform"):
     unique_population = []
     for candidate in population:
         if candidate not in unique_population:
             unique_population.append(candidate)
     if len(unique_population) < 2:
         raise ValueError(
-            "Component crossover requires at least two distinct persistent parents."
+            "Crossover requires at least two distinct persistent parents."
         )
-    return tuple(random.sample(unique_population, 2))
+    if parent_selection == "uniform":
+        return tuple(random.sample(unique_population, 2))
+    if parent_selection != "diversity":
+        raise ValueError(f"Unknown crossover parent selection: {parent_selection}")
+
+    parent_a = random.choice(unique_population)
+    candidates_b = [
+        candidate for candidate in unique_population if candidate != parent_a
+    ]
+    distances = [
+        joint_genotype_distance(parent_a, candidate) for candidate in candidates_b
+    ]
+    max_distance = max(distances)
+    farthest = [
+        candidate
+        for candidate, distance in zip(candidates_b, distances)
+        if distance == max_distance
+    ]
+    return parent_a, random.choice(farthest)
 
 
 def select_mutation_parent(population):
@@ -679,6 +708,103 @@ def component_crossover(parent_a, parent_b, *, use_depth_from_a=None):
     return child, source_details
 
 
+def layer_bundle_crossover(
+    parent_a,
+    parent_b,
+    grouped_layer_names,
+    *,
+    layer_sources=None,
+):
+    """Inherit each layer's depth state and represented quant genes together."""
+    if parent_a == parent_b:
+        raise ValueError("Layer-bundle crossover parents must be distinct.")
+    num_layers = len(parent_a["drop"]["attn"])
+    if any(
+        len(parent["drop"][kind]) != num_layers
+        for parent in (parent_a, parent_b)
+        for kind in ("attn", "mlp")
+    ):
+        raise ValueError("Layer-bundle crossover depth masks have incompatible shapes.")
+
+    if layer_sources is None:
+        layer_sources = [bool(random.getrandbits(1)) for _ in range(num_layers)]
+        if num_layers > 1 and (all(layer_sources) or not any(layer_sources)):
+            # Force a mixed source mask; ordinary duplicate checks still handle
+            # parents with only one materially different bundle.
+            layer_sources[random.randrange(num_layers)] = not layer_sources[0]
+    else:
+        layer_sources = list(layer_sources)
+        if len(layer_sources) != num_layers:
+            raise ValueError("Layer source count must match the depth mask length.")
+        if num_layers > 1 and (all(layer_sources) or not any(layer_sources)):
+            raise ValueError("Layer-bundle crossover must use both parents.")
+
+    child = copy.deepcopy(parent_a)
+    if any(
+        len(parent["quant"]) != len(grouped_layer_names)
+        for parent in (parent_a, parent_b)
+    ):
+        raise ValueError("Quantization state does not match the number of groups.")
+    parents = (parent_b, parent_a)  # False -> B, True -> A
+    for layer_id, use_parent_a in enumerate(layer_sources):
+        source = parents[int(use_parent_a)]
+        child["drop"]["attn"][layer_id] = source["drop"]["attn"][layer_id]
+        child["drop"]["mlp"][layer_id] = source["drop"]["mlp"][layer_id]
+
+    for group_id, group in enumerate(grouped_layer_names):
+        if any(
+            len(group) != len(parent["quant"][group_id])
+            for parent in (parent_a, parent_b)
+        ):
+            raise ValueError("Quantization state group length does not match module names.")
+        for gene_id, layer_name in enumerate(group):
+            gene_layer_id = layer_index(layer_name)
+            if gene_layer_id is None:
+                source = parent_a if random.getrandbits(1) else parent_b
+            else:
+                if gene_layer_id >= num_layers:
+                    raise ValueError(
+                        f"Quantization gene references unknown layer {gene_layer_id}."
+                    )
+                source = parents[int(layer_sources[gene_layer_id])]
+            child["quant"][group_id][gene_id] = source["quant"][group_id][gene_id]
+
+    details = {
+        "layers_from_parent_a": sum(layer_sources),
+        "layers_from_parent_b": num_layers - sum(layer_sources),
+        "layer_sources": ["a" if source else "b" for source in layer_sources],
+        "parent_distance": joint_genotype_distance(parent_a, parent_b),
+        "child_distance_from_parent_a": joint_genotype_distance(child, parent_a),
+        "child_distance_from_parent_b": joint_genotype_distance(child, parent_b),
+    }
+    return child, details
+
+
+def repair_depth_counts(drop_state, blocks_to_remove: int, drop_entire_block: bool):
+    """Repair exact drop counts without favoring either crossover parent."""
+    repaired = copy.deepcopy(drop_state)
+    kinds = ("attn",) if drop_entire_block else ("attn", "mlp")
+    for kind in kinds:
+        current = sum(repaired[kind])
+        if current > blocks_to_remove:
+            changed = random.sample(
+                [i for i, dropped in enumerate(repaired[kind]) if dropped],
+                current - blocks_to_remove,
+            )
+            for layer_id in changed:
+                repaired[kind][layer_id] = False
+        elif current < blocks_to_remove:
+            changed = random.sample(
+                [i for i, dropped in enumerate(repaired[kind]) if not dropped],
+                blocks_to_remove - current,
+            )
+            for layer_id in changed:
+                repaired[kind][layer_id] = True
+    if drop_entire_block:
+        repaired["mlp"] = copy.deepcopy(repaired["attn"])
+    return repaired
+
+
 def validate_quant_reconstruction_files(
     grouped_layer_names,
     quant_weights_path,
@@ -736,6 +862,17 @@ def try_component_crossover(
             use_depth_from_a=use_depth_from_a,
         )
         details.update(source_details)
+        details.update(
+            {
+                "parent_distance": joint_genotype_distance(parent_a, parent_b),
+                "child_distance_from_parent_a": joint_genotype_distance(
+                    child, parent_a
+                ),
+                "child_distance_from_parent_b": joint_genotype_distance(
+                    child, parent_b
+                ),
+            }
+        )
         validate_depth_counts(
             child["drop"],
             total_blocks,
@@ -769,12 +906,102 @@ def try_component_crossover(
             quant_weights_path,
             child["quant"],
         )
+        details["child_distance_from_parent_a"] = joint_genotype_distance(
+            child, parent_a
+        )
+        details["child_distance_from_parent_b"] = joint_genotype_distance(
+            child, parent_b
+        )
     except (FileNotFoundError, RuntimeError, ValueError) as error:
         details["rejection_reason"] = str(error)
         return None, details
 
     if details["repair_changed_gene_count"] > 0:
         details["classification"] = "component crossover + repair"
+    return child, details
+
+
+def try_layer_bundle_crossover(
+    parent_a,
+    parent_b,
+    *,
+    grouped_layer_names,
+    quant_weights_path,
+    target_bitwidth: float,
+    total_blocks: int,
+    blocks_to_remove: int,
+    active_quant_budget: bool,
+    step_size: int = 1,
+    drop_entire_block: bool = False,
+    layer_sources=None,
+):
+    """Build, repair, and validate one layer-bundle crossover proposal."""
+    details = {
+        "classification": "layer bundle crossover",
+        "repair_changed_gene_count": 0,
+        "depth_repair_changed_gene_count": 0,
+        "quant_repair_changed_gene_count": 0,
+        "rejection_reason": None,
+    }
+    try:
+        child, source_details = layer_bundle_crossover(
+            parent_a,
+            parent_b,
+            grouped_layer_names,
+            layer_sources=layer_sources,
+        )
+        details.update(source_details)
+
+        initial_drop = copy.deepcopy(child["drop"])
+        child["drop"] = repair_depth_counts(
+            child["drop"], blocks_to_remove, drop_entire_block
+        )
+        details["depth_repair_changed_gene_count"] = count_drop_state_changes(
+            initial_drop, child["drop"]
+        )
+        validate_depth_counts(
+            child["drop"], total_blocks, blocks_to_remove, drop_entire_block
+        )
+
+        if active_quant_budget:
+            initial_quant = copy.deepcopy(child["quant"])
+            child["quant"] = repair_active_quant_budget(
+                grouped_layer_names,
+                quant_weights_path,
+                child["quant"],
+                child["drop"],
+                target_bitwidth,
+                step_size,
+            )
+            details["quant_repair_changed_gene_count"] = count_quant_state_changes(
+                initial_quant, child["quant"]
+            )
+            validate_active_quant_budget(
+                grouped_layer_names,
+                child["quant"],
+                child["drop"],
+                target_bitwidth,
+            )
+
+        details["repair_changed_gene_count"] = (
+            details["depth_repair_changed_gene_count"]
+            + details["quant_repair_changed_gene_count"]
+        )
+        validate_quant_reconstruction_files(
+            grouped_layer_names, quant_weights_path, child["quant"]
+        )
+        details["child_distance_from_parent_a"] = joint_genotype_distance(
+            child, parent_a
+        )
+        details["child_distance_from_parent_b"] = joint_genotype_distance(
+            child, parent_b
+        )
+    except (FileNotFoundError, RuntimeError, ValueError) as error:
+        details["rejection_reason"] = str(error)
+        return None, details
+
+    if details["repair_changed_gene_count"] > 0:
+        details["classification"] = "layer bundle crossover + repair"
     return child, details
 
 
@@ -1091,8 +1318,15 @@ def parse_args(argv=None):
         "--crossover_type",
         "--crossover-type",
         default="component",
-        choices=["component"],
-        help="Crossover operator. This pilot supports component crossover only.",
+        choices=["component", "layer_bundle"],
+        help="Crossover operator; defaults to the original whole-component mode.",
+    )
+    parser.add_argument(
+        "--crossover_parent_selection",
+        "--crossover-parent-selection",
+        default="uniform",
+        choices=["uniform", "diversity"],
+        help="How crossover parent pairs are selected.",
     )
 
     parser.add_argument("--dtype", default="auto", choices=["auto", "float16", "float32", "bfloat16"])
@@ -1178,7 +1412,7 @@ def validate_crossover_configuration(args) -> None:
     )
     if args.sequential_mode != "none" and population_extension_requested:
         raise ValueError(
-            "Component crossover and persistent populations are supported only "
+            "Crossover and persistent populations are supported only "
             "with --sequential_mode none in this pilot."
         )
 
@@ -1466,6 +1700,8 @@ def main():
     print(f"Sequential mode: {args.sequential_mode}")
     print(f"Persistent population size: {args.population_size}")
     print(f"Crossover enabled: {crossover_enabled}")
+    print(f"Crossover type: {args.crossover_type}")
+    print(f"Crossover parent selection: {args.crossover_parent_selection}")
     print(
         "Effective survivors per selection: "
         f"{effective_selection_survivors}"
@@ -1748,6 +1984,9 @@ def main():
     stagnation_generations = 0
     crossover_offspring_attempted_total = 0
     crossover_offspring_accepted_total = 0
+    crossover_duplicates_total = 0
+    crossover_infeasible_candidates_total = 0
+    crossover_repaired_proposals_total = 0
     crossover_repair_changed_gene_count_total = 0
     mutation_offspring_accepted_total = 0
     offspring_attempts_total = 0
@@ -1807,6 +2046,11 @@ def main():
             for group in grouped_layer_names
         ],
     }
+    if args.crossover_parent_selection != "uniform":
+        # Preserve resume compatibility with pre-V2 component/uniform checkpoints.
+        checkpoint_identity["crossover_parent_selection"] = (
+            args.crossover_parent_selection
+        )
 
     checkpoint_path = os.path.join(
         args.output_dir,
@@ -1874,6 +2118,13 @@ def main():
         )
         crossover_offspring_accepted_total = int(
             state["crossover_offspring_accepted_total"]
+        )
+        crossover_duplicates_total = int(state.get("crossover_duplicates_total", 0))
+        crossover_infeasible_candidates_total = int(
+            state.get("crossover_infeasible_candidates_total", 0)
+        )
+        crossover_repaired_proposals_total = int(
+            state.get("crossover_repaired_proposals_total", 0)
         )
         crossover_repair_changed_gene_count_total = int(
             state["crossover_repair_changed_gene_count_total"]
@@ -1957,6 +2208,13 @@ def main():
             ),
             "crossover_offspring_accepted_total": int(
                 crossover_offspring_accepted_total
+            ),
+            "crossover_duplicates_total": int(crossover_duplicates_total),
+            "crossover_infeasible_candidates_total": int(
+                crossover_infeasible_candidates_total
+            ),
+            "crossover_repaired_proposals_total": int(
+                crossover_repaired_proposals_total
             ),
             "crossover_repair_changed_gene_count_total": int(
                 crossover_repair_changed_gene_count_total
@@ -2054,6 +2312,8 @@ def main():
             "fixed_quant_depth": 0,
             "component crossover": 0,
             "component crossover + repair": 0,
+            "layer bundle crossover": 0,
+            "layer bundle crossover + repair": 0,
         }
         depth_change_totals = {
             "depth": 0,
@@ -2064,6 +2324,8 @@ def main():
             "fixed_quant_depth": 0,
             "component crossover": 0,
             "component crossover + repair": 0,
+            "layer bundle crossover": 0,
+            "layer bundle crossover + repair": 0,
         }
         quant_change_totals = {
             "depth": 0,
@@ -2074,6 +2336,8 @@ def main():
             "fixed_quant_depth": 0,
             "component crossover": 0,
             "component crossover + repair": 0,
+            "layer bundle crossover": 0,
+            "layer bundle crossover + repair": 0,
         }
         interaction_aware_totals = {
             "budget_repair_quant_changes": 0,
@@ -2090,6 +2354,12 @@ def main():
         crossover_duplicates = 0
         crossover_infeasible_candidates = 0
         crossover_repair_changed_gene_count = 0
+        crossover_repaired_proposals = 0
+        crossover_parent_distances = []
+        crossover_child_distances_from_a = []
+        crossover_child_distances_from_b = []
+        crossover_layers_from_a = []
+        crossover_layers_from_b = []
         mutation_offspring_accepted = 0
 
         while len(offspring_list) < args.offspring:
@@ -2109,17 +2379,24 @@ def main():
                     "fixed_quant_legal_swap_count="
                     f"{fixed_quant_legal_swap_counts[-1] if fixed_quant_legal_swap_counts else None}."
                 )
-            use_component_crossover = (
+            use_crossover = (
                 crossover_enabled
                 and random.random() < args.crossover_probability
             )
             interaction_details = None
-            if use_component_crossover:
+            if use_crossover:
                 crossover_offspring_attempted += 1
                 crossover_offspring_attempted_total += 1
-                parent_a, parent_b = select_distinct_parents(population)
+                parent_a, parent_b = select_distinct_parents(
+                    population, args.crossover_parent_selection
+                )
                 reference_parent = parent_a
-                offspring, crossover_details = try_component_crossover(
+                crossover_function = (
+                    try_component_crossover
+                    if args.crossover_type == "component"
+                    else try_layer_bundle_crossover
+                )
+                offspring, crossover_details = crossover_function(
                     parent_a,
                     parent_b,
                     grouped_layer_names=grouped_layer_names,
@@ -2131,9 +2408,27 @@ def main():
                     step_size=args.step_size,
                     drop_entire_block=args.drop_entire_block,
                 )
+                if "parent_distance" in crossover_details:
+                    crossover_parent_distances.append(
+                        crossover_details["parent_distance"]
+                    )
+                    crossover_child_distances_from_a.append(
+                        crossover_details["child_distance_from_parent_a"]
+                    )
+                    crossover_child_distances_from_b.append(
+                        crossover_details["child_distance_from_parent_b"]
+                    )
+                    if "layers_from_parent_a" in crossover_details:
+                        crossover_layers_from_a.append(
+                            crossover_details["layers_from_parent_a"]
+                        )
+                        crossover_layers_from_b.append(
+                            crossover_details["layers_from_parent_b"]
+                        )
                 if offspring is None:
                     infeasible_candidates += 1
                     crossover_infeasible_candidates += 1
+                    crossover_infeasible_candidates_total += 1
                     continue
                 crossover_repair_changed_gene_count += crossover_details[
                     "repair_changed_gene_count"
@@ -2141,6 +2436,12 @@ def main():
                 crossover_repair_changed_gene_count_total += crossover_details[
                     "repair_changed_gene_count"
                 ]
+                crossover_repaired_proposals += int(
+                    crossover_details["repair_changed_gene_count"] > 0
+                )
+                crossover_repaired_proposals_total += int(
+                    crossover_details["repair_changed_gene_count"] > 0
+                )
                 mutation_type = crossover_details["classification"]
             else:
                 reference_parent = select_mutation_parent(population)
@@ -2292,14 +2593,16 @@ def main():
                     )
                 except CompressionBudgetError:
                     infeasible_candidates += 1
-                    if use_component_crossover:
+                    if use_crossover:
                         crossover_infeasible_candidates += 1
+                        crossover_infeasible_candidates_total += 1
                     continue
 
             if candidate_is_duplicate(offspring, population, offspring_list):
                 duplicate_candidates += 1
-                if use_component_crossover:
+                if use_crossover:
                     crossover_duplicates += 1
+                    crossover_duplicates_total += 1
                 continue
 
             offspring_list.append(offspring)
@@ -2313,7 +2616,7 @@ def main():
                 reference_parent["quant"],
                 offspring["quant"],
             )
-            if use_component_crossover:
+            if use_crossover:
                 crossover_offspring_accepted += 1
                 crossover_offspring_accepted_total += 1
             else:
@@ -2537,6 +2840,10 @@ def main():
                     ),
                     "interaction_aware_details": interaction_aware_totals,
                     "crossover_diagnostics": {
+                        "crossover_type": args.crossover_type,
+                        "crossover_parent_selection": (
+                            args.crossover_parent_selection
+                        ),
                         "crossover_offspring": crossover_offspring_accepted,
                         "mutation_offspring": mutation_offspring_accepted,
                         "crossover_offspring_attempted": (
@@ -2548,6 +2855,49 @@ def main():
                         ),
                         "crossover_repair_changed_gene_count": (
                             crossover_repair_changed_gene_count
+                        ),
+                        "crossover_repaired_proposals": (
+                            crossover_repaired_proposals
+                        ),
+                        "parent_distance_mean": (
+                            sum(crossover_parent_distances)
+                            / len(crossover_parent_distances)
+                            if crossover_parent_distances
+                            else None
+                        ),
+                        "parent_distance_min": (
+                            min(crossover_parent_distances)
+                            if crossover_parent_distances
+                            else None
+                        ),
+                        "parent_distance_max": (
+                            max(crossover_parent_distances)
+                            if crossover_parent_distances
+                            else None
+                        ),
+                        "child_distance_from_parent_a_mean": (
+                            sum(crossover_child_distances_from_a)
+                            / len(crossover_child_distances_from_a)
+                            if crossover_child_distances_from_a
+                            else None
+                        ),
+                        "child_distance_from_parent_b_mean": (
+                            sum(crossover_child_distances_from_b)
+                            / len(crossover_child_distances_from_b)
+                            if crossover_child_distances_from_b
+                            else None
+                        ),
+                        "layers_from_parent_a_mean": (
+                            sum(crossover_layers_from_a)
+                            / len(crossover_layers_from_a)
+                            if crossover_layers_from_a
+                            else None
+                        ),
+                        "layers_from_parent_b_mean": (
+                            sum(crossover_layers_from_b)
+                            / len(crossover_layers_from_b)
+                            if crossover_layers_from_b
+                            else None
                         ),
                         "persistent_population_size": len(population),
                         "unique_population_size": unique_candidate_count(
@@ -2805,9 +3155,15 @@ def main():
         "population_size": args.population_size,
         "crossover_probability": args.crossover_probability,
         "crossover_type": args.crossover_type,
+        "crossover_parent_selection": args.crossover_parent_selection,
         "crossover_enabled": crossover_enabled,
         "crossover_offspring_attempted": crossover_offspring_attempted_total,
         "crossover_offspring_accepted": crossover_offspring_accepted_total,
+        "crossover_duplicates": crossover_duplicates_total,
+        "crossover_infeasible_candidates": (
+            crossover_infeasible_candidates_total
+        ),
+        "crossover_repaired_proposals": crossover_repaired_proposals_total,
         "crossover_repair_changed_gene_count": (
             crossover_repair_changed_gene_count_total
         ),
@@ -2845,6 +3201,7 @@ def main():
             "population_size": args.population_size,
             "crossover_probability": args.crossover_probability,
             "crossover_type": args.crossover_type,
+            "crossover_parent_selection": args.crossover_parent_selection,
             "crossover_enabled": crossover_enabled,
             "configured_survivors_per_selection": list(
                 args.survivors_per_selection

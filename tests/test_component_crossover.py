@@ -11,9 +11,12 @@ from evo_joint_search import (
     component_crossover,
     crossover_is_enabled,
     effective_survivors_per_selection,
+    joint_genotype_distance,
+    layer_bundle_crossover,
     select_distinct_parents,
     select_mutation_parent,
     try_component_crossover,
+    try_layer_bundle_crossover,
     unique_candidate_count,
     validate_crossover_configuration,
     validate_persistent_population,
@@ -124,6 +127,92 @@ class ComponentCrossoverTest(unittest.TestCase):
         self.assertEqual(child["drop"], self.parent_a["drop"])
         self.assertEqual(self.parent_b["quant"], [[2, 4, 2, 2]])
 
+    def test_layer_bundle_crossover_has_mixed_coupled_inheritance(self) -> None:
+        layer_sources = [True, False, True, False]
+        child, details = layer_bundle_crossover(
+            self.parent_a,
+            self.parent_b,
+            self.grouped_layer_names,
+            layer_sources=layer_sources,
+        )
+
+        self.assertEqual(details["layers_from_parent_a"], 2)
+        self.assertEqual(details["layers_from_parent_b"], 2)
+        self.assertNotEqual(child, self.parent_a)
+        self.assertNotEqual(child, self.parent_b)
+        for layer_id, from_a in enumerate(layer_sources):
+            source = self.parent_a if from_a else self.parent_b
+            self.assertEqual(
+                child["drop"]["attn"][layer_id],
+                source["drop"]["attn"][layer_id],
+            )
+            self.assertEqual(
+                child["drop"]["mlp"][layer_id],
+                source["drop"]["mlp"][layer_id],
+            )
+            self.assertEqual(
+                child["quant"][0][layer_id], source["quant"][0][layer_id]
+            )
+
+    def test_layer_bundle_inherits_every_projection_for_its_layer(self) -> None:
+        names = [
+            f"model.layers.{layer_id}.self_attn.{projection}"
+            for layer_id in range(4)
+            for projection in ("q_proj", "k_proj")
+        ]
+        parent_a = make_candidate({0, 1}, [10 + i for i in range(8)])
+        parent_b = make_candidate({2, 3}, [20 + i for i in range(8)])
+        sources = [True, False, True, False]
+        child, _ = layer_bundle_crossover(
+            parent_a, parent_b, [names], layer_sources=sources
+        )
+
+        for gene_id, name in enumerate(names):
+            layer_id = int(name.split(".layers.")[1].split(".")[0])
+            source = parent_a if sources[layer_id] else parent_b
+            self.assertEqual(child["quant"][0][gene_id], source["quant"][0][gene_id])
+
+    def test_layer_bundle_final_child_is_feasible_after_repairs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            quant_root = Path(temp_dir)
+            self.create_quant_database(quant_root)
+            random.seed(11)
+            child, details = try_layer_bundle_crossover(
+                self.parent_a,
+                self.parent_b,
+                grouped_layer_names=self.grouped_layer_names,
+                quant_weights_path=str(quant_root),
+                target_bitwidth=3.0,
+                total_blocks=4,
+                blocks_to_remove=2,
+                active_quant_budget=True,
+                drop_entire_block=True,
+                layer_sources=[True, True, False, False],
+            )
+
+        self.assertIsNotNone(child)
+        self.assertGreater(details["depth_repair_changed_gene_count"], 0)
+        self.assertTrue(validate_depth_counts(child["drop"], 4, 2, True))
+        self.assertTrue(
+            validate_active_quant_budget(
+                self.grouped_layer_names,
+                child["quant"],
+                child["drop"],
+                3.0,
+            )
+        )
+
+    def test_layer_bundle_is_deterministic_with_seeded_search_rng(self) -> None:
+        random.seed(29)
+        first = layer_bundle_crossover(
+            self.parent_a, self.parent_b, self.grouped_layer_names
+        )
+        random.seed(29)
+        second = layer_bundle_crossover(
+            self.parent_a, self.parent_b, self.grouped_layer_names
+        )
+        self.assertEqual(first, second)
+
     def test_infeasible_crossover_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             quant_root = Path(temp_dir)
@@ -164,6 +253,25 @@ class ComponentCrossoverTest(unittest.TestCase):
         self.assertNotEqual(parent_a, parent_b)
         self.assertIn(parent_a, population)
         self.assertIn(parent_b, population)
+
+    def test_diversity_parent_selection_chooses_a_farthest_second_parent(self) -> None:
+        population = [
+            self.parent_a,
+            self.parent_b,
+            make_candidate({0, 2}, [3, 3, 3, 2]),
+            make_candidate({1, 3}, [4, 4, 4, 4]),
+        ]
+        random.seed(5)
+        parent_a, parent_b = select_distinct_parents(population, "diversity")
+        selected_distance = joint_genotype_distance(parent_a, parent_b)
+        self.assertEqual(
+            selected_distance,
+            max(
+                joint_genotype_distance(parent_a, candidate)
+                for candidate in population
+                if candidate != parent_a
+            ),
+        )
 
     def test_final_stage_elitism_includes_all_persistent_parents(self) -> None:
         persistent_population = [

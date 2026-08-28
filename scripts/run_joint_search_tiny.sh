@@ -24,6 +24,7 @@ TOKENS_PER_SELECTION="${TOKENS_PER_SELECTION:-512 2048}"
 POPULATION_SIZE="${POPULATION_SIZE:-1}"
 CROSSOVER_PROBABILITY="${CROSSOVER_PROBABILITY:-0.0}"
 CROSSOVER_TYPE="${CROSSOVER_TYPE:-component}"
+CROSSOVER_PARENT_SELECTION="${CROSSOVER_PARENT_SELECTION:-uniform}"
 FITNESS_FN="${FITNESS_FN:-kl}"
 GROUP_RULE="${GROUP_RULE:-none}"
 ACTIVE_QUANT_BUDGET="${ACTIVE_QUANT_BUDGET:-0}"
@@ -47,7 +48,21 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 EVO_JOINT_SEARCH_SCRIPT="${EVO_JOINT_SEARCH_SCRIPT:-evo_joint_search.py}"
 EXPERIMENT_LOG="${EXPERIMENT_LOG:-results/experiment_log.csv}"
 OUTPUTS_ROOT="${OUTPUTS_ROOT:-outputs/experiments}"
-RUN_ID="${RUN_ID:-joint_tiny_depth0125_quant3_g10_seed${SEED}}"
+if awk -v probability="$CROSSOVER_PROBABILITY" 'BEGIN { exit !(probability > 0) }'; then
+    if [[ "$CROSSOVER_TYPE" == "layer_bundle" ]]; then
+        RUN_VARIANT="layerbundle_xover"
+    else
+        RUN_VARIANT="component_xover"
+    fi
+    if [[ "$CROSSOVER_PARENT_SELECTION" == "diversity" ]]; then
+        RUN_VARIANT="${RUN_VARIANT}_diversity"
+    fi
+elif [[ "$POPULATION_SIZE" == "1" ]]; then
+    RUN_VARIANT="mutation"
+else
+    RUN_VARIANT="population"
+fi
+RUN_ID="${RUN_ID:-joint_g${GENERATIONS}_${RUN_VARIANT}_pop${POPULATION_SIZE}_seed${SEED}}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUTS_ROOT}/${RUN_ID}}"
 DRY_RUN="${DRY_RUN:-0}"
 MEMORY_POLL_INTERVAL_SECONDS="${MEMORY_POLL_INTERVAL_SECONDS:-5}"
@@ -85,11 +100,12 @@ Defaults:
   POPULATION_SIZE=1
   CROSSOVER_PROBABILITY=0.0
   CROSSOVER_TYPE=component
+  CROSSOVER_PARENT_SELECTION=uniform
 
 Examples:
   scripts/run_joint_search_tiny.sh --dry-run
   nohup bash scripts/run_joint_search_tiny.sh > outputs/joint_tiny_launcher.log 2>&1 &
-  RUN_ID=joint_tiny_depth0125_quant3_g10_seed0_retry1 scripts/run_joint_search_tiny.sh
+  RUN_ID=joint_g10_mutation_pop1_seed0_retry1 scripts/run_joint_search_tiny.sh
 EOF
 }
 
@@ -143,6 +159,7 @@ COMMAND=(
     --population_size "$POPULATION_SIZE"
     --crossover_probability "$CROSSOVER_PROBABILITY"
     --crossover_type "$CROSSOVER_TYPE"
+    --crossover_parent_selection "$CROSSOVER_PARENT_SELECTION"
     --fitness_fn "$FITNESS_FN"
     --group_rule "$GROUP_RULE"
     --joint_mutation_mode "$JOINT_MUTATION_MODE"
@@ -228,8 +245,12 @@ validate_configuration() {
         printf 'CROSSOVER_PROBABILITY greater than 0 requires POPULATION_SIZE at least 2.\n' >&2
         return 2
     fi
-    if [[ "$CROSSOVER_TYPE" != "component" ]]; then
-        printf 'CROSSOVER_TYPE must be component.\n' >&2
+    if [[ "$CROSSOVER_TYPE" != "component" && "$CROSSOVER_TYPE" != "layer_bundle" ]]; then
+        printf 'CROSSOVER_TYPE must be component or layer_bundle.\n' >&2
+        return 2
+    fi
+    if [[ "$CROSSOVER_PARENT_SELECTION" != "uniform" && "$CROSSOVER_PARENT_SELECTION" != "diversity" ]]; then
+        printf 'CROSSOVER_PARENT_SELECTION must be uniform or diversity.\n' >&2
         return 2
     fi
     if [[ "$SEQUENTIAL_MODE" != "none" && "$POPULATION_SIZE" != "1" ]]; then
@@ -524,6 +545,7 @@ START_TIME="$(date +%s)"
     printf 'population_size=%s\n' "$POPULATION_SIZE"
     printf 'crossover_probability=%s\n' "$CROSSOVER_PROBABILITY"
     printf 'crossover_type=%s\n' "$CROSSOVER_TYPE"
+    printf 'crossover_parent_selection=%s\n' "$CROSSOVER_PARENT_SELECTION"
     printf 'sequential_mode=%s\n' "$SEQUENTIAL_MODE"
     printf 'stage1_run_dir=%s\n' "$STAGE1_RUN_DIR"
     printf 'stage1_candidate=%s\n' "$STAGE1_CANDIDATE"
