@@ -1,0 +1,4 @@
+method,method_label,task,metric,runs,score_mean,score_sample_std,score_min,score_max
+joint_g50,Joint G50 depth + q_proj quant,arc_easy,"acc_norm,none",3,0.6021324354657688,0.005986697052006676,0.5980639730639731,0.609006734006734
+joint_g50,Joint G50 depth + q_proj quant,piqa,"acc_norm,none",3,0.7357635110627494,0.0029965019299707176,0.7328618063112078,0.7388465723612623
+joint_g50,Joint G50 depth + q_proj quant,winogrande,"acc,none",3,0.5908971323335964,0.008061853957403095,0.5816890292028414,0.5966850828729282

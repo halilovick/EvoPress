@@ -136,6 +136,57 @@ These fields allow comparison against the standard joint search without parsing 
 - The current implementation optimizes the search proposal mechanism, not the low-level inference kernel or real latency.
 - Results must be compared against matched standard runs with the same model, seed, generations, offspring, calibration data, and quantization database.
 
+## Current Mistral q_proj Result
+
+The first matched Mistral-7B test has been completed for seeds 0, 1, and 2.
+
+Both standard and interaction-aware runs used:
+
+- 25% depth pruning
+- `q_proj` quantization
+- active 3-bit target
+- 50 generations
+- 16 offspring
+- same seeds and calibration setup
+- estimated compression ratio 1.400x
+
+| Search metric | Standard mean | Interaction-aware mean | Mean delta | Wins |
+| --- | ---: | ---: | ---: | ---: |
+| WikiText2 PPL | 11.242 | 11.086 | -0.156 | 2/3 |
+| Train PPL | 10.760 | 10.789 | +0.029 | 1/3 |
+| Final calibration KL | 0.613 | 0.609 | -0.004 | 1/3 |
+| Runtime seconds | 1355.0 | 1271.3 | -83.7 | 3/3 |
+
+The final candidates were then replayed on the same three-dataset evaluation setup used for the standard joint G50 result.
+
+| Replay dataset | Standard mean | Interaction-aware mean | Mean delta | Wins |
+| --- | ---: | ---: | ---: | ---: |
+| WikiText2 PPL | 11.243 | 11.087 | -0.157 | 2/3 |
+| C4 PPL | 14.393 | 14.133 | -0.260 | 3/3 |
+| FineWeb-Edu PPL | 12.460 | 12.223 | -0.237 | 3/3 |
+
+LM-eval was also run on ARC-Easy, PIQA, and Winogrande.
+
+| LM-eval metric | Standard joint mean | Interaction-aware mean | Mean delta |
+| --- | ---: | ---: | ---: |
+| ARC-Easy acc_norm | 0.580 | 0.602 | +0.023 |
+| PIQA acc_norm | 0.739 | 0.736 | -0.003 |
+| Winogrande acc | 0.608 | 0.591 | -0.017 |
+| Macro average | 0.642 | 0.643 | +0.001 |
+
+Interpretation:
+
+- The interaction-aware operator gives a modest perplexity improvement over standard joint search in this matched Mistral q_proj setting.
+- The replay result is strongest on C4 and FineWeb-Edu, where interaction-aware wins all three seeds.
+- The result is not uniform across all metrics: train PPL and final calibration KL are essentially tied.
+- LM-eval is mixed: interaction-aware is essentially tied with standard joint on macro average, improves ARC-Easy, and drops on Winogrande.
+- This is a useful implementation contribution, but it should be framed as a perplexity improvement rather than a clear downstream-task improvement.
+
+Detailed files:
+
+- `results/interaction_aware_mistral_qproj_summary.csv`
+- `results/interaction_aware_mistral_qproj_summary.md`
+
 ## Smoke Test Commands
 
 Do not report results until these commands actually run on Datalab.
@@ -278,4 +329,3 @@ Metrics to compare:
 - estimated compression ratio
 - active average bitwidth
 - whether interaction-aware offspring are ever selected as parent
-

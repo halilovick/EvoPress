@@ -1,0 +1,372 @@
+\documentclass[aspectratio=169]{beamer}
+
+\mode<presentation>
+{
+ \usetheme[reversetitle,notitle,noauthor]{Wien}
+}
+
+\usepackage{url}
+\usepackage{graphicx}
+\graphicspath{{./}{./Figures/}}
+
+\usepackage{appendixnumberbeamer}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+
+% To avoid a warning from the hyperref package:
+\pdfstringdefDisableCommands{%
+  \def\translate{}%
+}
+
+\definecolor{tuwred}{RGB}{140,0,0}
+\definecolor{darkgreen}{RGB}{0,120,60}
+\definecolor{darkblue}{RGB}{0,70,140}
+\definecolor{darkorange}{RGB}{190,100,0}
+
+\newcommand{\good}[1]{\textcolor{darkgreen}{\textbf{#1}}}
+\newcommand{\warn}[1]{\textcolor{darkorange}{\textbf{#1}}}
+\newcommand{\bad}[1]{\textcolor{tuwred}{\textbf{#1}}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\title[EvoPress Extension]{Extending EvoPress with Joint Multi-Method Compression}
+\subtitle{Supervisor Meeting: Experimental Progress and Thesis Direction}
+\author[Kerim Halilovi\'c]{Kerim Halilovi\'c}
+\institute[TU Wien]{TU Wien, Vienna, Austria}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Goal of the current thesis direction}
+\begin{block}{Research question}
+Can an EvoPress-style evolutionary search jointly optimize \textbf{structural pruning} and \textbf{weight quantization} better than applying them independently?
+\end{block}
+
+\vspace{0.2cm}
+\begin{itemize}
+    \item Original EvoPress studies depth pruning, sparsity, and quantization mostly as separate applications.
+    \item My extension investigates \textbf{combined compression}: depth pruning + sparsity/quantization.
+    \item Main focus so far: whether joint search discovers structures that remain robust after quantization.
+\end{itemize}
+
+\vspace{0.25cm}
+\begin{block}{Current status}
+Pipeline is implemented and reproducible; first broad results show \textbf{mask-compatibility effects}, but not yet a general proof of joint-search superiority.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Experimental setup and practical constraint}
+\begin{columns}[T]
+\begin{column}{0.52\textwidth}
+\textbf{Models}
+\begin{itemize}
+    \item \texttt{Mistral-7B-v0.3}: depth-pruning validation
+    \item \texttt{TinyLlama-1.1B-Chat}: sparse/quant and joint experiments
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{Main metric}
+\begin{itemize}
+    \item WikiText2 perplexity (PPL), lower is better
+    \item KL divergence used as search fitness
+\end{itemize}
+\end{column}
+
+\begin{column}{0.44\textwidth}
+\textbf{Hardware constraint}
+\begin{itemize}
+    \item GPU varies: Tesla T4 or A40
+    \item A40 provides $\sim$45 GB VRAM
+    \item Container RAM limit: \bad{16 GB CPU RAM}
+\end{itemize}
+
+\vspace{0.2cm}
+\begin{block}{Consequence}
+Full Mistral sparse database generation is blocked by CPU RAM, so combined-method testing moved to TinyLlama.
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Possible hardware requirements for Mistral-7B experiments}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{Minimum pilot}
+\begin{itemize}
+    \item A40 / L40S GPU, 48 GB VRAM
+    \item 64 GB CPU RAM
+    \item 150 GB local NVMe storage
+    \item 4k--8k calibration tokens
+    \item Limited quantization scope first
+\end{itemize}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\textbf{Recommended full experiment}
+\begin{itemize}
+    \item A100 / H100 GPU, 80 GB VRAM
+    \item 128 GB CPU RAM
+    \item 500 GB local NVMe storage
+    \item 8k--32k calibration tokens
+    \item Broader all-projection quantization
+\end{itemize}
+\end{column}
+\end{columns}
+
+\vspace{0.25cm}
+\begin{block}{Practical takeaway}
+The GPU is less critical than the current CPU RAM limit. 
+A single large GPU with enough host RAM is preferable to multiple smaller GPUs.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Mistral-7B depth pruning: quality curve}
+\begin{table}
+\centering
+\begin{tabular}{lrrrr}
+\toprule
+Requested depth sparsity & Dropped attn & Dropped MLP & WikiText2 PPL & Train PPL \\
+\midrule
+Dense & 0 & 0 & \textbf{5.35} & -- \\
+12.5\% & 4 & 4 & \good{6.75} & 6.27 \\
+25.0\% & 8 & 8 & 14.70 & 13.30 \\
+37.5\% & 12 & 12 & 51.69 & 48.20 \\
+50.0\% & 16 & 16 & 371.75 & 337.00 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.2cm}
+\begin{itemize}
+    \item Moderate depth pruning is feasible, but quality drops nonlinearly.
+    \item 37.5\% and 50\% are difficult operating points.
+    \item This establishes the baseline structural-pruning behavior on a 7B model.
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Why evolutionary search matters: baselines}
+\begin{table}
+\centering
+\begin{tabular}{lrrr}
+\toprule
+Sparsity & EvoPress & Random median & Late-layer heuristic \\
+\midrule
+12.5\% & \good{6.75} & 21.50 & 61.16 \\
+25.0\% & \good{14.70} & 2490.00 & 541.00 \\
+37.5\% & \good{51.69} & 4476.00 & 1419.00 \\
+50.0\% & \good{371.75} & 15516.00 & 4992.00 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.2cm}
+\begin{block}{Finding}
+The location of removed modules matters strongly. EvoPress finds nontrivial masks that simple random or late-layer removal misses.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{TinyLlama: from feasibility to broader quantization}
+\begin{table}
+\centering
+\begin{tabular}{lrrr}
+\toprule
+Quantization scope & Modules & Database size & WikiText2 PPL \\
+\midrule
+Dense TinyLlama & -- & -- & \textbf{8.97} \\
+\texttt{q\_proj} only, searched 3-bit & 22 & 529 MB & \good{9.00} \\
+All attention projections & 88 & 1.19 GB & database feasible \\
+All transformer projections, uniform 3-bit & 154 & 5.55 GB & \good{13.62} \\
+All transformer projections, searched 3-bit & 154 & 5.55 GB & 14.58 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.2cm}
+\begin{block}{Important scope note}
+``All transformer projections'' means \texttt{q,k,v,o,gate,up,down}; embeddings, norms, and \texttt{lm\_head} are not included.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Independent vs. joint compression design}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{Independent composition}
+\begin{enumerate}
+    \item Run depth search
+    \item Run quantization search
+    \item Combine both selected configurations
+    \item Evaluate final model
+\end{enumerate}
+\end{block}
+
+\vspace{0.15cm}
+\textbf{Risk:} each method is optimized as if the other method were absent.
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\begin{block}{Joint search}
+\begin{enumerate}
+    \item One candidate contains both:
+    \begin{itemize}
+        \item depth mask
+        \item bit allocation
+    \end{itemize}
+    \item Mutate and select under one shared fitness
+    \item Enforce active 3-bit budget
+\end{enumerate}
+\end{block}
+
+\vspace{0.15cm}
+\textbf{Goal:} find depth masks that tolerate quantization better.
+\end{column}
+\end{columns}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Narrow joint experiment: \texttt{q\_proj} quantization}
+\begin{table}
+\centering
+\begin{tabular}{rrrr}
+\toprule
+Seed & Depth-only PPL & Joint depth+quant PPL & Joint $-$ depth \\
+\midrule
+0 & 12.02 & \good{11.03} & -0.99 \\
+1 & \good{12.28} & 12.55 & +0.27 \\
+2 & \good{11.03} & 11.72 & +0.69 \\
+\midrule
+Mean & 11.78 & 11.77 & -0.01 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.2cm}
+\begin{itemize}
+    \item Joint search worked and replayed correctly.
+    \item Added \texttt{q\_proj} quantization had a small average penalty: $\sim$0.15 PPL.
+    \item But: no consistent improvement over depth-only across three seeds.
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Broad joint experiment: all transformer projections}
+\begin{table}
+\centering
+\begin{tabular}{lr}
+\toprule
+Configuration & WikiText2 PPL \\
+\midrule
+Dense & \textbf{8.97} \\
+Depth-only seed 0 & 12.02 \\
+Uniform all-projection 3-bit & 13.62 \\
+Searched all-projection 3-bit & 14.58 \\
+Depth + uniform all-projection 3-bit & 21.77 \\
+Depth + independently searched all-projection 3-bit & 23.81 \\
+Joint active-budget depth + all-projection 3-bit & 21.47 \\
+Joint depth mask + uniform 3-bit & \good{21.25} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{block}{Key result}
+The best broad combined model is not the learned mixed-bit allocation; it is the \textbf{jointly discovered depth mask} paired with \textbf{uniform 3-bit quantization}.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Attribution: what actually improved?}
+\small
+\begin{table}
+\centering
+\begin{tabular}{p{0.42\textwidth} r p{0.35\textwidth}}
+\toprule
+\textbf{Comparison} & \textbf{PPL change} & \textbf{Interpretation} \\
+\midrule
+Joint vs. independent searched composition & -2.34 & Joint search helps \\
+Joint vs. uniform composition & -0.30 & Small improvement \\
+Joint mask + uniform vs. original mask + uniform & -0.52 & Better quantization-compatible mask \\
+Joint allocation vs. uniform on joint mask & +0.22 & Mixed-bit allocation is worse \\
+Searched quant-only vs. uniform quant-only & +0.96 & Uniform is stronger baseline \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{block}{Supported interpretation}
+Joint search found a \textbf{depth mask that is more robust to broad quantization}. It did \textbf{not} find a better nonuniform bit allocation.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Proposed thesis contribution}
+\begin{block}{Working thesis framing}
+Extending EvoPress to \textbf{joint multi-method compression}: analyzing when structural pruning decisions should be optimized together with weight-level quantization.
+\end{block}
+
+\vspace{0.2cm}
+\textbf{Current evidence supports:}
+\begin{itemize}
+    \item Joint search is technically feasible and replayable.
+    \item Broad transformer-projection quantization can be combined with depth pruning.
+    \item Joint search can discover a depth mask that tolerates quantization better.
+    \item Uniform bit allocation is currently stronger than learned mixed-bit allocation.
+    \item The contribution is not ``joint search always wins.''
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Limitations and next steps}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{Current limitations}
+\begin{itemize}
+    \item Broad all-projection joint result is currently one seed.
+    \item Evaluation is mostly WikiText2 PPL.
+    \item No final effective-size or latency measurements yet.
+\end{itemize}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\textbf{Proposed next step}
+\begin{itemize}
+    \item Run a stronger independent vs. joint comparison.
+    \item Use larger search budgets: more generations, offspring, and calibration tokens.
+    \item Repeat the comparison across multiple seeds.
+\end{itemize}
+\end{column}
+\end{columns}
+
+\vspace{0.25cm}
+\begin{block}{Goal}
+Validate whether joint search consistently discovers depth masks that are more robust to quantization.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\end{document}

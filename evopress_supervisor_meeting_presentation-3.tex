@@ -31,8 +31,8 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\title[EvoPress Extension]{Extending EvoPress with Joint Multi-Method Compression}
-\subtitle{Supervisor Meeting: Focused Progress Update}
+\title[EvoPress Attribution]{Joint Compression Attribution for EvoPress}
+\subtitle{Supervisor Meeting: Progress Update and Thesis Direction}
 \author[Kerim Halilovi\'c]{Kerim Halilovi\'c}
 \institute[TU Wien]{TU Wien, Vienna, Austria}
 \date{July 2026}
@@ -45,46 +45,193 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\begin{frame}{What changed since the last meeting?}
+\begin{frame}{Main message}
+\begin{block}{Current thesis direction}
+Extend EvoPress from single-method compression to \textbf{joint multi-method compression}, focusing on depth pruning + quantization.
+\end{block}
+
+\vspace{0.25cm}
+\textbf{What changed since the last meeting}
 \begin{itemize}
-    \item The main evidence moved from TinyLlama feasibility to \textbf{Mistral-7B experiments}.
-    \item I implemented and tested a joint search pipeline for \textbf{depth pruning + quantization}.
-    \item I compared:
+    \item The main experiments are now on \textbf{Mistral-7B}, not only TinyLlama.
+    \item I implemented joint depth+quantization search and an interaction-aware mutation mode.
+    \item I added a new \textbf{Joint Compression Attribution Framework}.
+    \item The framework tells us whether the improvement comes from:
     \begin{itemize}
-        \item depth-only pruning,
-        \item quantization-only search,
-        \item independent depth + quantization,
-        \item joint depth + quantization search.
+        \item the depth mask,
+        \item the quantization assignment,
+        \item or the exact pairing of both.
     \end{itemize}
-    \item I evaluated the main results on WikiText2, C4, FineWeb-Edu, and LM-eval tasks.
-    \item The result is promising, but not a simple ``joint search always wins'' story.
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Thesis hypothesis}
+\begin{block}{Working hypothesis}
+Joint EvoPress-style search can find compression decisions that are more compatible than independently optimized pruning and quantization decisions.
+\end{block}
+
+\vspace{0.25cm}
+\textbf{Why this is plausible}
+\begin{itemize}
+    \item Depth pruning removes complete attention or MLP modules.
+    \item Quantization changes selected projection weights.
+    \item These decisions interact: a good pruning mask alone may not be the best pruning mask after quantization.
+    \item A joint search should be able to select candidates based on the final combined compressed model.
 \end{itemize}
 
 \vspace{0.2cm}
-\begin{block}{Current high-level finding}
-Joint search improves perplexity over matched independent compression, but the benefit depends on quantization scope and evaluation metric.
+\begin{block}{What the attribution framework tests}
+If joint search improves quality, which part of the final candidate is responsible?
 \end{block}
 \end{frame}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\begin{frame}{Refined research question}
-\begin{block}{Thesis question}
-Can EvoPress-style evolutionary search optimize \textbf{depth pruning} and \textbf{weight quantization} jointly, and when is this better than applying both methods independently?
-\end{block}
+\begin{frame}{Why an attribution framework was needed}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\textbf{Before attribution}
+\begin{itemize}
+    \item We could compare final methods:
+    \begin{itemize}
+        \item independent compression,
+        \item standard joint search,
+        \item interaction-aware joint search.
+    \end{itemize}
+    \item But this only says which final model is better.
+    \item It does not explain \textbf{why} it is better.
+\end{itemize}
+\end{column}
+
+\begin{column}{0.48\textwidth}
+\textbf{Question left open}
+\begin{itemize}
+    \item Did joint search find a better pruning mask?
+    \item Did it find a better bit allocation?
+    \item Did it find a pair that only works well together?
+    \item Is uniform 3-bit already as good as the searched assignment?
+\end{itemize}
+\end{column}
+\end{columns}
 
 \vspace{0.25cm}
-\textbf{Why this is interesting}
+\begin{block}{Motivation}
+The framework turns a final-result comparison into a controlled recombination analysis.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{What the attribution framework does}
+\begin{block}{Core idea}
+Take depth masks and quantization assignments from existing runs, recombine them, replay the final compressed model, and evaluate perplexity.
+\end{block}
+
+\vspace{0.2cm}
+\textbf{Example recombinations}
 \begin{itemize}
-    \item Pruning removes complete attention or MLP modules.
-    \item Quantization changes the weights of selected projection modules.
-    \item These two decisions can interact.
-    \item A pruning mask that works well alone may not be the best mask after quantization.
+    \item independent depth mask + independent quant assignment
+    \item joint depth mask + independent quant assignment
+    \item independent depth mask + joint quant assignment
+    \item joint depth mask + joint quant assignment
+    \item joint depth mask + uniform 3-bit quantization
 \end{itemize}
 
 \vspace{0.2cm}
-\begin{block}{More precise framing}
-The thesis is about the \textbf{quality-compression tradeoff} of joint multi-method compression, not about proving that joint search is always superior.
+\begin{block}{Important}
+This is a \textbf{post-hoc replay analysis}. It does not run a new evolutionary search and does not prove causality by itself.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Attribution matrix}
+\begin{center}
+\begin{tabular}{c|cccc}
+ & \multicolumn{4}{c}{\textbf{Quantization source}} \\
+\textbf{Depth source} & independent & standard joint & interaction-aware & uniform 3-bit \\
+\hline
+independent & eval & eval & eval & eval \\
+standard joint & eval & eval & eval & eval \\
+interaction-aware & eval & eval & eval & eval \\
+\end{tabular}
+\end{center}
+
+\vspace{0.3cm}
+\textbf{Each cell means}
+\begin{enumerate}
+    \item load one depth mask,
+    \item load one quantization assignment,
+    \item repair/validate the active bitwidth budget,
+    \item replay the combined compressed model,
+    \item evaluate WikiText2, C4, and FineWeb-Edu perplexity.
+\end{enumerate}
+
+\vspace{0.15cm}
+\begin{block}{Interpretation}
+Rows tell us about depth-mask quality. Columns tell us about quant-assignment quality.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Implementation details}
+\small
+\begin{itemize}
+    \item Added main script:
+    \begin{center}
+        \texttt{evo\_joint\_attribution.py}
+    \end{center}
+    \item Added aggregation helper:
+    \begin{center}
+        \texttt{scripts/aggregate\_attribution.py}
+    \end{center}
+    \item Reuses existing EvoPress logic:
+    \begin{itemize}
+        \item candidate loading from \texttt{final\_candidate.json} or config text files,
+        \item \texttt{apply\_joint\_state} for replay,
+        \item \texttt{repair\_active\_quant\_budget} for active bitwidth repair,
+        \item existing PPL evaluation utilities.
+    \end{itemize}
+    \item Outputs structured artifacts:
+    \begin{itemize}
+        \item combined candidate JSON,
+        \item metrics JSON/CSV,
+        \item compression metrics,
+        \item Markdown summaries,
+        \item full attribution matrix.
+    \end{itemize}
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Budget handling}
+\begin{block}{Problem}
+When a depth mask and quantization assignment come from different runs, the active average bitwidth may no longer be exactly 3-bit.
+\end{block}
+
+\vspace{0.2cm}
+\textbf{Why}
+\begin{itemize}
+    \item Dropped modules do not consume active quantization budget.
+    \item A quant assignment can contain bitwidths for modules that are dropped by another depth mask.
+    \item Recombination can therefore change the active set.
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{Framework behavior}
+\begin{itemize}
+    \item Check active average bitwidth before replay.
+    \item Repair it to target 3-bit when needed.
+    \item Record whether repair happened and how many bitwidths changed.
+\end{itemize}
+
+\vspace{0.15cm}
+\begin{block}{Why this matters}
+All attribution cells are evaluated at matched compression, not accidentally easier or harder budgets.
 \end{block}
 \end{frame}
 
@@ -93,37 +240,34 @@ The thesis is about the \textbf{quality-compression tradeoff} of joint multi-met
 \begin{frame}{Experimental setup}
 \begin{columns}[T]
 \begin{column}{0.48\textwidth}
-\textbf{Model and compression}
+\textbf{Model}
 \begin{itemize}
-    \item Model: \texttt{mistralai/Mistral-7B-v0.3}
+    \item \texttt{mistralai/Mistral-7B-v0.3}
     \item Depth pruning target: 25\%
-    \item Quantization target: average 3-bit
-    \item Search setting: 50 generations, 16 offspring, 3 seeds
-\end{itemize}
-
-\vspace{0.2cm}
-\textbf{Quantization scopes}
-\begin{itemize}
-    \item \texttt{q\_proj}: narrow, lower compression
-    \item \texttt{q/k/v/o}: broader attention scope, higher compression
+    \item Quant target: active average 3-bit
+    \item Datasets:
+    \begin{itemize}
+        \item WikiText2
+        \item C4
+        \item FineWeb-Edu
+    \end{itemize}
 \end{itemize}
 \end{column}
 
 \begin{column}{0.48\textwidth}
-\textbf{Evaluation}
+\textbf{Attribution cases}
 \begin{itemize}
-    \item Search fitness: KL divergence against dense model logits
-    \item Reported language-model metrics:
+    \item \textbf{\texttt{q\_proj} scope}
     \begin{itemize}
-        \item WikiText2 PPL
-        \item C4 PPL
-        \item FineWeb-Edu PPL
+        \item 3 seeds
+        \item 12 recombinations per seed
+        \item compression ratio: 1.400x
     \end{itemize}
-    \item Downstream checks:
+    \item \textbf{attention scope}
     \begin{itemize}
-        \item ARC-Easy
-        \item PIQA
-        \item Winogrande
+        \item 3 seeds
+        \item 12 recombinations per seed
+        \item compression ratio: 1.547x
     \end{itemize}
 \end{itemize}
 \end{column}
@@ -132,151 +276,116 @@ The thesis is about the \textbf{quality-compression tradeoff} of joint multi-met
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\begin{frame}{Independent vs. joint search}
-\begin{columns}[T]
-\begin{column}{0.48\textwidth}
-\begin{block}{Independent compression}
-\begin{center}
-\texttt{depth search}\\
-$\downarrow$\\
-\texttt{quant search}\\
-$\downarrow$\\
-\texttt{combine configs}\\
-$\downarrow$\\
-\texttt{evaluate final model}
-\end{center}
-\end{block}
-
-\textbf{Problem:} each method is optimized mostly as if the other method did not exist.
-\end{column}
-
-\begin{column}{0.48\textwidth}
-\begin{block}{Joint compression}
-\begin{center}
-\texttt{candidate = depth mask + quant assignment}\\
-$\downarrow$\\
-\texttt{mutate candidate}\\
-$\downarrow$\\
-\texttt{evaluate combined model}\\
-$\downarrow$\\
-\texttt{select next parent}
-\end{center}
-\end{block}
-
-\textbf{Goal:} select configurations that work well after both compression methods are active.
-\end{column}
-\end{columns}
-\end{frame}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\begin{frame}{What is one joint-search candidate?}
-\begin{block}{One candidate represents one compressed model}
-A joint-search candidate contains both compression decisions at the same time.
-\end{block}
-
-\vspace{0.2cm}
-\textbf{Part 1: depth mask}
-\begin{itemize}
-    \item For each transformer block, decide whether attention is kept or dropped.
-    \item For each transformer block, decide whether the MLP is kept or dropped.
-\end{itemize}
-
-\vspace{0.15cm}
-\textbf{Part 2: quantization assignment}
-\begin{itemize}
-    \item For selected projection modules, assign a bitwidth such as 2, 3, or 4 bits.
-    \item The assignment must satisfy the target average bitwidth budget.
-\end{itemize}
-
-\vspace{0.15cm}
-\begin{block}{Key point}
-The candidate is not evaluated as pruning alone or quantization alone. It is evaluated as one final depth-pruned and quantized model.
-\end{block}
-\end{frame}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\begin{frame}{One generation of joint search}
-\begin{enumerate}
-    \item Start from the current parent candidate.
-    \item Copy it to create offspring candidates.
-    \item Mutate each offspring.
-    \begin{itemize}
-        \item In the main runs, each offspring mutates either the depth mask or the quantization assignment.
-        \item The choice is random (50/50).
-        \item If the depth mask changes, the active quantization budget is repaired so the average bitwidth stays valid.
-        \item New interaction-aware mode: mutate depth, repair active quant budget, then adjust quantization on touched active layers.
-    \end{itemize}
-    \item Assemble the compressed candidate.
-    \item Evaluate fitness using KL divergence against the dense model.
-    \item Keep the best candidate as the next parent.
-\end{enumerate}
-\end{frame}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\begin{frame}{Main Mistral-7B results}
-\begin{table}
-\centering
+\begin{frame}{Result 1: \texttt{q\_proj} attribution}
 \scriptsize
-\begin{tabular}{llrrrr}
-\toprule
-Scope & Method & Compression & WikiText2 & C4 & FineWeb-Edu \\
-\midrule
-baseline & Dense FP16 & 1.000x & \good{5.960} & \good{8.860} & \good{7.340} \\
-depth & Depth-only 25\% & 1.317x & 11.817 & 14.760 & 12.980 \\
-\texttt{q\_proj} & Independent depth + quant & 1.400x & 11.947 & 14.910 & 13.140 \\
-\texttt{q\_proj} & Joint depth + quant & 1.400x & \good{11.243} & \good{14.393} & \good{12.460} \\
-attention & Independent depth + quant & 1.547x & 13.107 & 16.090 & 14.237 \\
-attention & Joint depth + quant & 1.547x & \good{12.670} & \good{15.593} & \good{13.783} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\vspace{0.2cm}
-\begin{block}{Main result}
-At matched compression, joint search improves perplexity over independent composition for both quantization scopes.
-\end{block}
-\end{frame}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\begin{frame}{What improved, and what did not?}
 \begin{table}
 \centering
-\small
-\begin{tabular}{lrrrr}
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{llrrr}
 \toprule
-Comparison & WikiText2 & C4 & FineWeb-Edu & LM-eval macro \\
+Depth source & Quant source & WikiText2 & C4 & FineWeb-Edu \\
 \midrule
-\texttt{q\_proj}: joint $-$ independent & \good{-0.703} & \good{-0.517} & \good{-0.680} & \warn{-0.005} \\
-attention: joint $-$ independent & \good{-0.437} & \good{-0.497} & \good{-0.453} & \good{+0.004} \\
+indep. & indep. & 11.96 & 14.89 & 13.15 \\
+indep. & standard joint & 11.96 & 14.94 & 13.15 \\
+indep. & interaction-aware & 12.13 & 15.09 & 13.36 \\
+indep. & uniform 3-bit & 11.96 & 14.88 & 13.17 \\
+\midrule
+standard joint & indep. & 11.21 & 14.36 & 12.43 \\
+standard joint & standard joint & 11.24 & 14.39 & 12.46 \\
+standard joint & interaction-aware & 11.49 & 14.61 & 12.74 \\
+standard joint & uniform 3-bit & 11.21 & 14.38 & 12.44 \\
+\midrule
+interaction-aware & indep. & \good{10.95} & \good{13.94} & \good{12.05} \\
+interaction-aware & standard joint & 10.98 & 13.97 & 12.08 \\
+interaction-aware & interaction-aware & 11.09 & 14.13 & 12.22 \\
+interaction-aware & uniform 3-bit & \good{10.95} & 13.97 & 12.06 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\vspace{0.25cm}
-\textbf{Interpretation}
+\vspace{-0.05cm}
 \begin{itemize}
-    \item The strongest evidence is on perplexity.
-    \item \texttt{q\_proj} joint search is the best current quality-compression point.
-    \item Attention-scope joint search gives higher compression, but lower quality.
-    \item LM-eval is more mixed, so I should not overclaim downstream improvement.
+    \item Full 3-by-4 attribution matrix; values are means over seeds 0, 1, and 2.
+    \item All rows are matched at compression ratio 1.400x and active average 3-bit.
+    \item Best rows all use the interaction-aware depth mask; quant source matters less.
 \end{itemize}
 \end{frame}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\begin{frame}{What the results support}
+\begin{frame}{Interpretation: what improved?}
+\begin{block}{Main attribution finding}
+For \texttt{q\_proj} quantization, the \textbf{interaction-aware depth mask} is the main improvement.
+\end{block}
+
+\vspace{0.2cm}
+\textbf{Evidence}
+\begin{itemize}
+    \item Using the interaction-aware depth mask improves mean PPL across all three datasets.
+    \item It works with several quantization sources:
+    \begin{itemize}
+        \item independent quantization,
+        \item standard joint quantization,
+        \item interaction-aware quantization,
+        \item uniform 3-bit.
+    \end{itemize}
+    \item Uniform 3-bit is very competitive with searched bit assignments.
+\end{itemize}
+
+\vspace{0.15cm}
+\begin{block}{Conservative conclusion}
+The framework suggests that the search mainly found a more quantization-compatible pruning mask, not a clearly superior mixed-bit assignment.
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Result 2: attention-scope attribution}
+\scriptsize
+\begin{table}
+\centering
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{llrrr}
+\toprule
+Depth source & Quant source & WikiText2 & C4 & FineWeb-Edu \\
+\midrule
+indep. & indep. & 13.15 & 16.10 & 14.34 \\
+indep. & standard joint & 13.20 & 16.26 & 14.38 \\
+indep. & interaction-aware & 14.19 & 17.40 & 15.43 \\
+indep. & uniform 3-bit & 13.13 & 16.19 & 14.29 \\
+\midrule
+standard joint & indep. & 12.70 & 15.63 & 13.78 \\
+standard joint & standard joint & 12.67 & 15.59 & 13.78 \\
+standard joint & interaction-aware & 13.72 & 17.15 & 15.02 \\
+standard joint & uniform 3-bit & 12.61 & 15.60 & 13.70 \\
+\midrule
+interaction-aware & indep. & 12.08 & \good{14.90} & 13.02 \\
+interaction-aware & standard joint & 12.30 & 15.14 & 13.12 \\
+interaction-aware & interaction-aware & 12.42 & 15.25 & 13.45 \\
+interaction-aware & uniform 3-bit & \good{12.07} & 14.99 & \good{12.97} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{-0.05cm}
+\begin{itemize}
+    \item Full 3-by-4 attribution matrix; values are means over seeds 0, 1, and 2.
+    \item All rows are matched at compression ratio 1.547x and active average 3-bit.
+    \item Interaction-aware depth is best overall, but the interaction-aware quant assignment is weak when paired with other depth masks.
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{What this supports and does not support}
 \begin{columns}[T]
 \begin{column}{0.48\textwidth}
 \begin{block}{Supported}
 \begin{itemize}
-    \item Joint search is executable on Mistral-7B.
-    \item Joint search improves matched independent compression in PPL.
-    \item The effect appears on WikiText2, C4, and FineWeb-Edu.
-    \item Quantization scope strongly changes the tradeoff.
+    \item Joint compression can be replayed and analyzed systematically.
+    \item Interaction-aware \texttt{q\_proj} search finds a better depth mask.
+    \item The improvement is consistent across WikiText2, C4, and FineWeb-Edu.
+    \item Attribution helps explain the mechanism behind the result.
 \end{itemize}
 \end{block}
 \end{column}
@@ -285,9 +394,9 @@ attention: joint $-$ independent & \good{-0.437} & \good{-0.497} & \good{-0.453}
 \begin{block}{Not supported}
 \begin{itemize}
     \item Not evidence that joint search always wins.
+    \item Not evidence that searched mixed-bit assignments are always better than uniform 3-bit.
     \item Not yet evidence for full all-linear Mistral compression.
-    \item Not a clear downstream task improvement for every setting.
-    \item Not yet evidence that the new interaction-aware mutation improves results; it still needs matched experiments.
+    \item Interaction-aware quant assignments are not consistently better than uniform 3-bit.
 \end{itemize}
 \end{block}
 \end{column}
@@ -296,43 +405,70 @@ attention: joint $-$ independent & \good{-0.437} & \good{-0.497} & \good{-0.453}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\begin{frame}{How this shapes the thesis}
-\begin{block}{Careful thesis claim}
-Joint EvoPress-style depth+quantization search improves matched independent compression in perplexity, but the benefit depends on quantization scope and evaluation metric.
+\begin{frame}{How this shapes the thesis proposal}
+\begin{block}{Proposed thesis framing}
+EvoPress-style joint multi-method compression for LLMs, with attribution analysis of how pruning and quantization decisions interact.
 \end{block}
 
 \vspace{0.25cm}
-\textbf{Thesis direction}
+\textbf{Methodological contribution}
 \begin{itemize}
-    \item Extend EvoPress from single-method compression to joint multi-method compression.
-    \item Study how pruning masks and quantization assignments interact.
-    \item Compare independent and joint optimization under matched compression.
-    \item Explain the compression-quality tradeoff rather than only reporting best numbers.
+    \item Implement joint depth+quantization search.
+    \item Add interaction-aware mutation as a search-operator extension.
+    \item Add replay-based attribution matrix to analyze final candidates.
 \end{itemize}
 
 \vspace{0.2cm}
-\begin{block}{Open question for the thesis}
-Can the new interaction-aware mutation become the concrete algorithmic contribution beyond simply combining two existing compression methods?
+\textbf{Experimental contribution}
+\begin{itemize}
+    \item Matched-compression Mistral-7B experiments.
+    \item Multi-dataset perplexity evaluation.
+    \item Evidence that the main \texttt{q\_proj} gain comes from the depth mask.
+    \item Stress-test showing that broader attention quantization is harder.
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Current thesis claim}
+\begin{block}{Careful claim}
+Joint EvoPress-style depth+quantization search improves matched independent compression in perplexity for Mistral-7B \texttt{q\_proj} quantization. Attribution suggests that the improvement mainly comes from a more quantization-compatible depth mask. The benefit depends on quantization scope and evaluation metric.
 \end{block}
+
+\vspace{0.25cm}
+\textbf{Why this is a stronger story now}
+\begin{itemize}
+    \item We are not only reporting final numbers.
+    \item We can explain which component of the joint candidate mattered.
+    \item We can separate successful cases from limitations.
+    \item This gives the thesis a clearer methodology chapter:
+    \begin{itemize}
+        \item joint search,
+        \item interaction-aware mutation,
+        \item attribution replay.
+    \end{itemize}
+\end{itemize}
 \end{frame}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \begin{frame}{Next steps}
 \begin{enumerate}
-    \item Understand and document the joint-search code path in detail.
-    \item Write a clear algorithm description:
+    \item Write the algorithm section in thesis form:
     \begin{itemize}
         \item candidate representation,
         \item mutation operators,
-        \item budget repair,
-        \item fitness evaluation,
-        \item selection.
+        \item active budget repair,
+        \item replay attribution matrix.
     \end{itemize}
-    \item Run stronger independent vs. joint searches with larger search budgets.
-    \item Compare across multiple seeds.
-    \item Test the new interaction-aware mutation against the standard joint search.
-    \item Continue thesis writing around methodology and results.
+    \item Decide whether to run attention attribution for more seeds.
+    \item Add a compact downstream evaluation discussion:
+    \begin{itemize}
+        \item LM-eval is more mixed than perplexity,
+        \item avoid overclaiming.
+    \end{itemize}
+    \item Turn current results into final thesis tables.
+    \item Continue writing methodology and experimental setup chapters.
 \end{enumerate}
 \end{frame}
 
@@ -340,84 +476,106 @@ Can the new interaction-aware mutation become the concrete algorithmic contribut
 
 \appendix
 
-\begin{frame}{Backup: hardware and reproducibility}
+\begin{frame}{Backup: one joint-search candidate}
+\begin{block}{Candidate = depth mask + quantization assignment}
+The evolutionary search stores both compression decisions in one candidate.
+\end{block}
+
+\vspace{0.2cm}
+\textbf{Depth mask}
 \begin{itemize}
-    \item Datalab hardware varied: T4, V100, and A40 depending on availability.
-    \item The main practical limit is still the 16 GB container CPU RAM cap.
-    \item Full Mistral SparseGPT-style database generation was not practical in this environment.
-    \item Mistral quantization databases were feasible with restricted scopes.
-    \item Structured outputs now include:
-    \begin{itemize}
-        \item \texttt{experiment\_log.csv},
-        \item \texttt{run\_summary.json},
-        \item \texttt{generation\_log.csv},
-        \item \texttt{final\_candidate.json}.
-    \end{itemize}
+    \item For each transformer block: keep/drop attention.
+    \item For each transformer block: keep/drop MLP.
+\end{itemize}
+
+\vspace{0.15cm}
+\textbf{Quantization assignment}
+\begin{itemize}
+    \item For selected projection modules: assign bitwidth 2, 3, or 4.
+    \item Bitwidths can exist for modules later dropped by the depth mask.
+    \item Active-budget computation ignores dropped modules.
 \end{itemize}
 \end{frame}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\begin{frame}{Backup: depth pruning and simple baselines}
-\begin{itemize}
-    \item Mistral depth pruning was first validated independently.
-    \item Random and late-layer dropping were added as cheap baselines.
-    \item These simple baselines often produced much worse or collapsed PPL.
-    \item This supports that module choice matters, not only the number of dropped modules.
-\end{itemize}
+\begin{frame}{Backup: one generation of joint search}
+\small
+\begin{enumerate}
+    \item Start from the current parent candidate.
+    \item Copy it into offspring candidates.
+    \item Mutate candidates:
+    \begin{itemize}
+        \item standard mode: mutate depth or quantization,
+        \item interaction-aware mode: mutate depth, repair active budget, then adjust quantization on touched active layers.
+    \end{itemize}
+    \item Replay each compressed candidate.
+    \item Evaluate KL divergence against dense model logits.
+    \item Select the best candidate as the next parent.
+\end{enumerate}
 
-\vspace{0.25cm}
-\begin{block}{Why this matters}
-The joint experiments build on a meaningful depth-pruning search, not on arbitrary layer removal.
+\vspace{0.15cm}
+\begin{block}{Key distinction}
+Implementation may apply quantization before pruning for efficiency, but selection is based on the final combined compressed model.
 \end{block}
 \end{frame}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\begin{frame}{Backup: TinyLlama feasibility}
-\begin{itemize}
-    \item TinyLlama was used to debug the sparse, quantization, and combined pipelines faster.
-    \item Sparse database generation and sparse search completed on TinyLlama.
-    \item Quantization databases completed for:
+\begin{frame}{Backup: interaction-aware mutation}
+\small
+\begin{enumerate}
+    \item Copy the current candidate.
+    \item Make a budget-preserving depth swap.
+    \item Recompute the active quantized modules under the new mask.
+    \item Repair active average bitwidth to the target.
+    \item Prefer quantization changes on layers touched by the depth swap.
+    \item Log:
     \begin{itemize}
-        \item \texttt{q\_proj},
-        \item attention projections,
-        \item all transformer projections.
+        \item mutation mode,
+        \item depth changes,
+        \item quantization changes,
+        \item repair count.
     \end{itemize}
-    \item These runs were useful engineering evidence, but Mistral-7B is now the main thesis evidence.
-\end{itemize}
+\end{enumerate}
+
+\vspace{0.15cm}
+\begin{block}{Implementation contribution}
+This changes the search operator, not the model architecture, dataset, or quantization database.
+\end{block}
 \end{frame}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\begin{frame}{Backup: search variants and ablations}
+\begin{frame}{Backup: final-result comparison before attribution}
+\small
 \begin{table}
 \centering
-\small
-\begin{tabular}{lrrl}
+\begin{tabular}{llrrrr}
 \toprule
-Variant & Runs & Mean WikiText2 & Interpretation \\
+Scope & Method & Compression & WikiText2 & C4 & FineWeb-Edu \\
 \midrule
-Standard joint G50 & 3 & 11.242 & clean fully evaluated result \\
-Joint-aware mutation & 3 & 11.547 & mixed; not clearly better \\
-Fixed mutation strength & 3 & 11.211 & slightly better W2; not fully evaluated \\
+baseline & Dense FP16 & 1.000x & \good{5.960} & \good{8.860} & \good{7.340} \\
+depth & Depth-only 25\% & 1.317x & 11.817 & 14.760 & 12.980 \\
+\texttt{q\_proj} & Independent depth + quant & 1.400x & 11.947 & 14.910 & 13.140 \\
+\texttt{q\_proj} & Standard joint & 1.400x & 11.243 & 14.393 & 12.460 \\
+\texttt{q\_proj} & Interaction-aware joint & 1.400x & \good{11.087} & \good{14.133} & \good{12.223} \\
+attention & Independent depth + quant & 1.547x & 13.107 & 16.090 & 14.237 \\
+attention & Standard joint & 1.547x & \good{12.670} & \good{15.593} & \good{13.783} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\vspace{0.2cm}
-\begin{itemize}
-    \item These variants are useful for understanding the search behavior.
-    \item They should stay secondary until they are evaluated with the same breadth as the main result.
-\end{itemize}
+\vspace{0.1cm}
+\textbf{Limitation:} this table shows final method quality, but not which part of the joint candidate caused the improvement.
 \end{frame}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\begin{frame}{Backup: LM-eval detail}
+\begin{frame}{Backup: downstream task caveat}
+\small
 \begin{table}
 \centering
-\small
 \begin{tabular}{lrrrr}
 \toprule
 Method & ARC-Easy & PIQA & Winogrande & Macro \\
@@ -425,36 +583,63 @@ Method & ARC-Easy & PIQA & Winogrande & Macro \\
 Dense FP16 & \good{0.801} & \good{0.819} & \good{0.742} & \good{0.787} \\
 Depth-only 25\% & 0.588 & 0.737 & 0.618 & 0.648 \\
 \texttt{q\_proj} independent & 0.583 & 0.739 & 0.620 & 0.647 \\
-\texttt{q\_proj} joint & 0.580 & 0.739 & 0.608 & 0.642 \\
+\texttt{q\_proj} standard joint & 0.580 & 0.739 & 0.608 & 0.642 \\
+\texttt{q\_proj} interaction-aware & 0.585 & 0.742 & 0.603 & 0.643 \\
 Attention independent & 0.535 & 0.696 & 0.558 & 0.596 \\
 Attention joint & 0.534 & 0.707 & 0.561 & 0.601 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\vspace{0.15cm}
-\textbf{Takeaway:} task accuracy is more mixed than perplexity, so the thesis should distinguish PPL gains from downstream task gains.
+\vspace{0.1cm}
+\textbf{Takeaway:} perplexity results are clearer than downstream task results, so the thesis should not overclaim downstream gains.
 \end{frame}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\begin{frame}{Backup: generated summaries}
+\begin{frame}{Backup: reproducibility artifacts}
 \small
 \begin{itemize}
-    \item Main consolidated result:
+    \item Main attribution implementation:
     \begin{itemize}
-        \item \texttt{results/mistral\_scope\_comparison.md}
-        \item \texttt{results/mistral\_scope\_comparison.csv}
+        \item \texttt{evo\_joint\_attribution.py}
+        \item \texttt{scripts/aggregate\_attribution.py}
+        \item \texttt{results/attribution\_framework\_report.md}
     \end{itemize}
-    \item Generalization summaries:
+    \item Main result artifacts:
     \begin{itemize}
-        \item \texttt{results/mistral\_generalization\_aggregate.csv}
-        \item \texttt{results/mistral\_attention\_generalization\_aggregate.csv}
+        \item \texttt{results/attribution/mistral\_qproj\_aggregate.md}
+        \item \texttt{results/attribution/mistral\_qproj\_seed0/}
+        \item \texttt{results/attribution/mistral\_qproj\_seed1/}
+        \item \texttt{results/attribution/mistral\_qproj\_seed2/}
+        \item \texttt{results/attribution/mistral\_attention\_seed0/}
     \end{itemize}
-    \item LM-eval summaries:
+    \item Search-run artifacts:
     \begin{itemize}
-        \item \texttt{results/mistral\_lmeval\_aggregate.csv}
-        \item \texttt{results/mistral\_attention\_lmeval\_aggregate.csv}
+        \item \texttt{final\_candidate.json}
+        \item \texttt{run\_summary.json}
+        \item \texttt{generation\_log.csv}
+        \item \texttt{experiment\_log.csv}
+    \end{itemize}
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{frame}{Backup: hardware context}
+\begin{itemize}
+    \item Datalab GPU varied depending on availability:
+    \begin{itemize}
+        \item T4,
+        \item V100,
+        \item A40.
+    \end{itemize}
+    \item The main bottleneck was often the 16 GB container CPU RAM cap.
+    \item Full Mistral sparse-database generation remained impractical in this environment.
+    \item Restricted Mistral quantization scopes were feasible:
+    \begin{itemize}
+        \item \texttt{q\_proj},
+        \item attention projections.
     \end{itemize}
 \end{itemize}
 \end{frame}

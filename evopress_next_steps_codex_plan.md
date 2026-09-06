@@ -33,38 +33,6 @@ The reason for this order is simple: before running expensive experiments, the s
 
 ---
 
-## Repository-Specific Clarifications
-
-Use these definitions consistently during implementation:
-
-- Run artifacts belong under `outputs/experiments/<run_id>/`, matching the
-  existing launchers and `results/experiment_log.csv`.
-- `active_parameters` is a theoretical inference count. Depth-pruned modules
-  are bypassed during the forward pass but their tensors remain allocated in
-  the current in-memory model.
-- Bitwidth averages are parameter-weighted, not simple averages over module
-  counts.
-- `estimated_compression_ratio` is
-  `dense_weight_memory_mb / estimated_weight_memory_mb`.
-- The estimated model size is theoretical. Current GPTQ database files contain
-  reconstructed floating-point tensors and are not the deployable packed model
-  size.
-- `generation_log.csv` is the new native structured search log.
-  `generation_metrics.csv` remains supported as the existing stdout-derived
-  compatibility artifact.
-- Peak GPU allocation should come from PyTorch peak-memory counters. Peak CPU
-  RSS should use an operating-system peak metric or the existing sampled
-  cgroup monitor; a single `psutil.Process(...).memory_info().rss` reading is
-  current RSS and must not be labeled as a peak.
-- A generation's search fitness is only a fixed calibration KL value when the
-  complete fixed calibration set was used. Mini-batch selection fitness must
-  remain labeled `best_search_fitness`.
-- The first implementation milestone may write unavailable expensive metrics
-  as `null`. Final fixed-set KL and optional C4/FineWeb evaluation are separate
-  validation steps and should not block the initial reporting implementation.
-
----
-
 # Phase 1 — Instrumentation and Reporting
 
 ## Goal
@@ -144,7 +112,7 @@ Create a JSON summary file for every run.
 Suggested output path:
 
 ```text
-outputs/experiments/<run_id>/run_summary.json
+outputs/<run_name>/run_summary.json
 ```
 
 Suggested schema:
@@ -227,7 +195,7 @@ Create a CSV or JSONL file that logs every generation.
 Suggested path:
 
 ```text
-outputs/experiments/<run_id>/generation_log.csv
+outputs/<run_name>/generation_log.csv
 ```
 
 Suggested columns:
@@ -488,15 +456,13 @@ peak_gpu_reserved_mb = torch.cuda.max_memory_reserved() / 1024**2
 For CPU memory, use `psutil` if available:
 
 ```python
-import resource
+import psutil, os
 
-peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+process = psutil.Process(os.getpid())
+peak_cpu_memory_mb = process.memory_info().rss / 1024**2
 ```
 
-Normalize `ru_maxrss` for the host operating system. When the launcher already
-produces `memory_samples.csv`, the sampled cgroup maximum is the preferred
-container-level value. If neither source is available, set the field to
-`null`.
+If `psutil` is not available, skip CPU memory and set it to `null`.
 
 ---
 
@@ -621,7 +587,7 @@ scripts/validate_run_outputs.py
 Usage:
 
 ```bash
-python scripts/validate_run_outputs.py outputs/experiments/<run_id>
+python scripts/validate_run_outputs.py outputs/<run_name>
 ```
 
 It should check:

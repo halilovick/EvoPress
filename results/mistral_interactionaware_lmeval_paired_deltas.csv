@@ -1,0 +1,1 @@
+task,metric,seed,depth_score,independent_score,joint_g50_score,joint_minus_depth,joint_minus_independent,independent_minus_depth

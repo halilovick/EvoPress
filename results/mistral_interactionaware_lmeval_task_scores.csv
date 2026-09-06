@@ -1,0 +1,10 @@
+method,method_label,seed,run_id,task,metric,score
+joint_g50,Joint G50 depth + q_proj quant,0,lmeval_interactionaware_joint_g50_mistral_s0.25_qproj3.0_tasks_seed0,arc_easy,"acc_norm,none",0.5980639730639731
+joint_g50,Joint G50 depth + q_proj quant,0,lmeval_interactionaware_joint_g50_mistral_s0.25_qproj3.0_tasks_seed0,piqa,"acc_norm,none",0.735582154515778
+joint_g50,Joint G50 depth + q_proj quant,0,lmeval_interactionaware_joint_g50_mistral_s0.25_qproj3.0_tasks_seed0,winogrande,"acc,none",0.5943172849250198
+joint_g50,Joint G50 depth + q_proj quant,1,lmeval_interactionaware_joint_g50_mistral_s0.25_qproj3.0_tasks_seed1,arc_easy,"acc_norm,none",0.5993265993265994
+joint_g50,Joint G50 depth + q_proj quant,1,lmeval_interactionaware_joint_g50_mistral_s0.25_qproj3.0_tasks_seed1,piqa,"acc_norm,none",0.7388465723612623
+joint_g50,Joint G50 depth + q_proj quant,1,lmeval_interactionaware_joint_g50_mistral_s0.25_qproj3.0_tasks_seed1,winogrande,"acc,none",0.5966850828729282
+joint_g50,Joint G50 depth + q_proj quant,2,lmeval_interactionaware_joint_g50_mistral_s0.25_qproj3.0_tasks_seed2,arc_easy,"acc_norm,none",0.609006734006734
+joint_g50,Joint G50 depth + q_proj quant,2,lmeval_interactionaware_joint_g50_mistral_s0.25_qproj3.0_tasks_seed2,piqa,"acc_norm,none",0.7328618063112078
+joint_g50,Joint G50 depth + q_proj quant,2,lmeval_interactionaware_joint_g50_mistral_s0.25_qproj3.0_tasks_seed2,winogrande,"acc,none",0.5816890292028414
