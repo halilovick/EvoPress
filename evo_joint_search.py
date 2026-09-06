@@ -1363,6 +1363,9 @@ def mutate_interaction_aware_candidate(
     drop_entire_block: bool = False,
     max_drop_mutations: int = 1,
     quant_mutations: int = 1,
+    *,
+    target_cost_bits: Optional[int] = None,
+    budget_cost_kwargs=None,
 ):
     """
     Coordinated joint mutation for depth pruning + quantization.
@@ -1373,6 +1376,12 @@ def mutate_interaction_aware_candidate(
     bitwidth. Finally, it tries to perform a bitwidth exchange involving a
     layer touched by the depth mutation, falling back to any active layer if no
     touched-layer exchange is available.
+
+    With target_cost_bits, repair instead uses the same group-preserving total
+    storage budget and cost kwargs as standard exact-budget search. Repair runs
+    BEFORE the exchange: the exchange preserves the repaired active level sum
+    within an equal-size group, with unchanged depth and GPTQ metadata. Thus the
+    main loop's subsequent exact-budget repair is a no-op and cannot erase it.
     """
     offspring = copy.deepcopy(candidate)
     original_drop = copy.deepcopy(offspring["drop"])
@@ -1385,14 +1394,33 @@ def mutate_interaction_aware_candidate(
     )
     touched_layer_ids = changed_drop_layer_ids(original_drop, offspring["drop"])
 
-    repaired_quant = repair_active_quant_budget(
-        grouped_layer_names,
-        quant_weights_path,
-        offspring["quant"],
-        offspring["drop"],
-        target_bitwidth,
-        step_size,
-    )
+    if target_cost_bits is None:
+        repaired_quant = repair_active_quant_budget(
+            grouped_layer_names,
+            quant_weights_path,
+            offspring["quant"],
+            offspring["drop"],
+            target_bitwidth,
+            step_size,
+        )
+    else:
+        validate_depth_counts(
+            offspring["drop"],
+            len(original_drop["attn"]),
+            sum(original_drop["attn"]),
+            drop_entire_block,
+        )
+        repaired_quant = repair_quant_state_to_budget(
+            model,
+            grouped_layer_names,
+            quant_weights_path,
+            offspring["quant"],
+            offspring["drop"],
+            target_cost_bits,
+            preserve_equal_size_group_costs=True,
+            uniform_reference_bitwidth=int(target_bitwidth),
+            **(budget_cost_kwargs or {}),
+        )
     budget_repair_changes = count_quant_state_changes(offspring["quant"], repaired_quant)
     offspring["quant"] = repaired_quant
 
@@ -1428,6 +1456,18 @@ def mutate_interaction_aware_candidate(
             continue
 
         offspring["quant"] = before_quant
+
+    if target_cost_bits is not None:
+        validate_exact_budget(
+            candidate_compression_cost(
+                model,
+                offspring,
+                grouped_layer_names=grouped_layer_names,
+                **(budget_cost_kwargs or {}),
+            ),
+            target_cost_bits,
+            context="interaction-aware exact-budget offspring",
+        )
 
     details = {
         "depth_mask_entries_changed": count_drop_state_changes(
@@ -1480,6 +1520,14 @@ def parse_args(argv=None):
         ),
     )
     parser.add_argument(
+        "--allow_exact_budget_ablation",
+        action="store_true",
+        help=(
+            "Explicitly opt into interaction-aware mutation under the exact "
+            "total-model budget. Standard reproduction runs do not need this flag."
+        ),
+    )
+    parser.add_argument(
         "--quantization_group_size",
         default=None,
         type=int,
@@ -1510,7 +1558,7 @@ def parse_args(argv=None):
         help=(
             "Mutation policy for joint search. 'standard' proposes depth-only "
             "or quantization-only offspring. 'interaction_aware' changes the "
-            "depth mask, repairs the active quantization budget, and then "
+            "depth mask, repairs the selected compression budget, and then "
             "attempts a quantization exchange on touched active layers."
         ),
     )
@@ -1743,10 +1791,20 @@ def validate_joint_search_args(args):
             raise ValueError(
                 "--quantization_group_size is required when metadata is included."
             )
-    if exact_total_budget and args.joint_mutation_mode != "standard":
+    exact_interaction_ablation = (
+        exact_total_budget
+        and args.joint_mutation_mode == "interaction_aware"
+        and getattr(args, "allow_exact_budget_ablation", False)
+    )
+    if (
+        exact_total_budget
+        and args.joint_mutation_mode != "standard"
+        and not exact_interaction_ablation
+    ):
         raise ValueError(
             "The first apples-to-apples experiment intentionally uses standard "
-            "joint mutation; interaction-aware mutation must be a separate ablation."
+            "joint mutation; interaction-aware mutation requires an explicit "
+            "separate ablation with --allow_exact_budget_ablation."
         )
     if exact_total_budget and args.joint_aware_mutation:
         raise ValueError(
@@ -1756,8 +1814,15 @@ def validate_joint_search_args(args):
         raise ValueError(
             "Sequential initialization is outside the first exact-budget comparison."
         )
-    if args.joint_mutation_mode == "interaction_aware" and not args.active_quant_budget:
-        raise ValueError("--joint_mutation_mode interaction_aware requires --active_quant_budget.")
+    if (
+        args.joint_mutation_mode == "interaction_aware"
+        and not args.active_quant_budget
+        and not exact_interaction_ablation
+    ):
+        raise ValueError(
+            "--joint_mutation_mode interaction_aware requires --active_quant_budget "
+            "or an exact-total-budget ablation with --allow_exact_budget_ablation."
+        )
     if args.joint_mutation_mode == "interaction_aware" and args.joint_aware_mutation:
         raise ValueError(
             "--joint_mutation_mode interaction_aware and --joint_aware_mutation "
@@ -2802,17 +2867,32 @@ def main():
                         continue
                 elif args.joint_mutation_mode == "interaction_aware":
                     mutation_type = "interaction_aware"
-                    offspring, interaction_details = mutate_interaction_aware_candidate(
-                        model,
-                        grouped_layer_names,
-                        args.quant_weights_path,
-                        offspring,
-                        args.target_bitwidth,
-                        args.step_size,
-                        args.drop_entire_block,
-                        depth_mutation_limit,
-                        quant_mutation_count,
-                    )
+                    interaction_budget_kwargs = {}
+                    if exact_total_budget:
+                        interaction_budget_kwargs = {
+                            "target_cost_bits": target_cost_bits,
+                            "budget_cost_kwargs": budget_cost_kwargs,
+                        }
+                    try:
+                        offspring, interaction_details = mutate_interaction_aware_candidate(
+                            model,
+                            grouped_layer_names,
+                            args.quant_weights_path,
+                            offspring,
+                            args.target_bitwidth,
+                            args.step_size,
+                            args.drop_entire_block,
+                            depth_mutation_limit,
+                            quant_mutation_count,
+                            **interaction_budget_kwargs,
+                        )
+                    except CompressionBudgetError:
+                        if not exact_total_budget:
+                            raise
+                        # As on the standard exact-budget path, retry a depth
+                        # proposal whose storage cost cannot be repaired exactly.
+                        infeasible_candidates += 1
+                        continue
                 elif use_joint_aware:
                     mutation_type = "joint_aware"
                     offspring = mutate_joint_aware_candidate(
@@ -3521,6 +3601,7 @@ def main():
             "skip_initial_single_candidate_evaluation": (
                 args.skip_initial_single_candidate_evaluation
             ),
+            "allow_exact_budget_ablation": args.allow_exact_budget_ablation,
             "selection_tokens": list(args.tokens_per_selection),
             "selection_survivors": list(args.survivors_per_selection),
             "fitness_fn": args.fitness_fn,
