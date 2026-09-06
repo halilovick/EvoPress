@@ -51,6 +51,8 @@ OUTPUTS_ROOT="${OUTPUTS_ROOT:-outputs/experiments}"
 if awk -v probability="$CROSSOVER_PROBABILITY" 'BEGIN { exit !(probability > 0) }'; then
     if [[ "$CROSSOVER_TYPE" == "layer_bundle" ]]; then
         RUN_VARIANT="layerbundle_xover"
+    elif [[ "$CROSSOVER_TYPE" == "local_exchange" ]]; then
+        RUN_VARIANT="localexchange_xover"
     else
         RUN_VARIANT="component_xover"
     fi
@@ -245,8 +247,8 @@ validate_configuration() {
         printf 'CROSSOVER_PROBABILITY greater than 0 requires POPULATION_SIZE at least 2.\n' >&2
         return 2
     fi
-    if [[ "$CROSSOVER_TYPE" != "component" && "$CROSSOVER_TYPE" != "layer_bundle" ]]; then
-        printf 'CROSSOVER_TYPE must be component or layer_bundle.\n' >&2
+    if [[ "$CROSSOVER_TYPE" != "component" && "$CROSSOVER_TYPE" != "layer_bundle" && "$CROSSOVER_TYPE" != "local_exchange" ]]; then
+        printf 'CROSSOVER_TYPE must be component, layer_bundle, or local_exchange.\n' >&2
         return 2
     fi
     if [[ "$CROSSOVER_PARENT_SELECTION" != "uniform" && "$CROSSOVER_PARENT_SELECTION" != "diversity" ]]; then

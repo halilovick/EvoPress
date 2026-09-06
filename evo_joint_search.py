@@ -5,6 +5,8 @@ import math
 import os
 import random
 import re
+from collections import defaultdict
+from fractions import Fraction
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -15,7 +17,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from src.common_utils import fix_seed
 from src.compression_budget import (
     CompressionBudgetError,
+    available_module_bitwidths,
     candidate_compression_cost,
+    flatten_quant_state as validate_and_flatten_quant_state,
     inspect_quantization_database,
     repair_quant_state_to_budget,
     uniform_quantization_target_cost,
@@ -62,6 +66,7 @@ from src.sequential_search import (
     load_stage1_depth_candidate,
     load_stage1_quant_candidate,
     mutate_fixed_quant_depth_candidate,
+    quant_module_is_active,
     resolve_stage1_artifacts,
     sequential_mode_metadata,
     stable_json_hash,
@@ -1005,6 +1010,287 @@ def try_layer_bundle_crossover(
     return child, details
 
 
+def build_local_exchange_metadata(model, grouped_layer_names, quant_weights_path):
+    """Cache static DB levels and weight counts once, without loading weights."""
+    return {
+        name: (
+            model.get_submodule(name).weight.numel(),
+            tuple(available_module_bitwidths(quant_weights_path, name)),
+        )
+        for group in grouped_layer_names
+        for name in group
+    }
+
+
+def try_local_exchange_crossover(
+    parent_a,
+    parent_b,
+    *,
+    model,
+    grouped_layer_names,
+    quant_weights_path,
+    target_bitwidth: float,
+    total_blocks: int,
+    blocks_to_remove: int,
+    active_quant_budget: bool,
+    step_size: int = 1,
+    drop_entire_block: bool = False,
+    target_cost_bits=None,
+    budget_cost_kwargs=None,
+    metadata=None,
+):
+    """Apply one legal donor-guided exchange to a deep copy of parent A.
+
+    Quant steps are adjacent *available DB levels*, independently of step_size.
+    Cost-matched pairs are indexed by their integer bit-cost delta. Active
+    budgeting additionally preserves every existing group's exact level sum.
+    Structural candidates are screened with the shared validators. No repair
+    helper is used, including when the total-model budget is enabled.
+    """
+    details = {
+        "classification": "local exchange crossover",
+        "repair_changed_gene_count": 0,
+        "depth_repair_changed_gene_count": 0,
+        "quant_repair_changed_gene_count": 0,
+        "rejection_reason": None,
+        "no_legal_exchange": False,
+    }
+    try:
+        metadata = (
+            metadata
+            if metadata is not None
+            else build_local_exchange_metadata(
+                model, grouped_layer_names, quant_weights_path
+            )
+        )
+        cost_kwargs = dict(budget_cost_kwargs or {})
+        for parent in (parent_a, parent_b):
+            validate_depth_counts(
+                parent["drop"], total_blocks, blocks_to_remove, drop_entire_block
+            )
+            # The shared cost flattener also rejects invalid levels and shapes.
+            assignments = validate_and_flatten_quant_state(
+                grouped_layer_names, parent["quant"]
+            )
+            for name, level in assignments.items():
+                if level <= 0 or level not in metadata[name][1]:
+                    raise ValueError(
+                        f"Unavailable quantization level {level} for {name}."
+                    )
+                quant_module_is_active(name, parent["drop"])
+
+        details["parent_distance"] = joint_genotype_distance(parent_a, parent_b)
+        target = Fraction(str(target_bitwidth))
+
+        def validate_budgets(candidate):
+            if active_quant_budget:
+                validate_active_quant_budget(
+                    grouped_layer_names,
+                    candidate["quant"],
+                    candidate["drop"],
+                    target_bitwidth,
+                )
+                # Usually implied by equal-size groups, but use actual weight
+                # counts as well so uneven modules can never pass by assumption.
+                deviation = sum(
+                    metadata[name][0] * (candidate["quant"][group_id][gene_id] - target)
+                    for group_id, group in enumerate(grouped_layer_names)
+                    for gene_id, name in enumerate(group)
+                    if quant_module_is_active(name, candidate["drop"])
+                )
+                if deviation != 0:
+                    raise CompressionBudgetError(
+                        "Active weighted quantization budget is not exact."
+                    )
+            if target_cost_bits is not None:
+                validate_exact_budget(
+                    candidate_compression_cost(
+                        model,
+                        candidate,
+                        grouped_layer_names=grouped_layer_names,
+                        **cost_kwargs,
+                    ),
+                    target_cost_bits,
+                    context="local exchange candidate",
+                )
+
+        validate_budgets(parent_a)
+        moves = {kind: [] for kind in ("attention", "mlp", "quantization", "block")}
+        structural_types = (
+            (("block", ("attn", "mlp")),)
+            if drop_entire_block
+            else (
+                ("attention", ("attn",)),
+                ("mlp", ("mlp",)),
+            )
+        )
+        for move_type, kinds in structural_types:
+            mask_a, mask_b = parent_a["drop"][kinds[0]], parent_b["drop"][kinds[0]]
+            restore_ids = [
+                i for i in range(total_blocks) if mask_a[i] and not mask_b[i]
+            ]
+            remove_ids = [i for i in range(total_blocks) if not mask_a[i] and mask_b[i]]
+            for restore_id in restore_ids:
+                for remove_id in remove_ids:
+                    candidate = copy.deepcopy(parent_a)
+                    for kind in kinds:
+                        candidate["drop"][kind][restore_id] = False
+                        candidate["drop"][kind][remove_id] = True
+                    try:
+                        validate_budgets(candidate)
+                    except ValueError:
+                        continue
+                    moves[move_type].append((restore_id, remove_id))
+
+        upward = defaultdict(list)
+        downward = defaultdict(list)
+        for group_id, group in enumerate(grouped_layer_names):
+            for gene_id, name in enumerate(group):
+                if not all(
+                    quant_module_is_active(name, p["drop"])
+                    for p in (parent_a, parent_b)
+                ):
+                    continue
+                base_level = parent_a["quant"][group_id][gene_id]
+                donor_level = parent_b["quant"][group_id][gene_id]
+                if base_level == donor_level:
+                    continue
+                weight_count, levels = metadata[name]
+                direction = 1 if donor_level > base_level else -1
+                next_level = levels[levels.index(base_level) + direction]
+                level_delta = next_level - base_level
+                # Opposite directions must cancel real cost. In active mode
+                # they must also cancel within the same budget group.
+                key = (abs(weight_count * level_delta),)
+                if active_quant_budget:
+                    key += (group_id, abs(level_delta))
+                bucket = upward if direction > 0 else downward
+                bucket[key].append((group_id, gene_id, next_level))
+        for key, up_genes in upward.items():
+            for up_gene in up_genes:
+                for down_gene in downward.get(key, ()):
+                    moves["quantization"].append((up_gene, down_gene))
+
+        details["legal_move_counts"] = {
+            kind: len(options) for kind, options in moves.items()
+        }
+        available_types = [kind for kind, options in moves.items() if options]
+        if not available_types:
+            details["rejection_reason"] = "no_legal_exchange"
+            details["no_legal_exchange"] = True
+            return None, details
+
+        move_type = random.choice(available_types)
+        move = random.choice(moves[move_type])
+        child = copy.deepcopy(parent_a)
+        if move_type == "quantization":
+            for group_id, gene_id, next_level in move:
+                child["quant"][group_id][gene_id] = next_level
+        else:
+            kinds = (
+                ("attn", "mlp")
+                if move_type == "block"
+                else ("attn" if move_type == "attention" else "mlp",)
+            )
+            restore_id, remove_id = move
+            for kind in kinds:
+                child["drop"][kind][restore_id] = False
+                child["drop"][kind][remove_id] = True
+        validate_depth_counts(
+            child["drop"], total_blocks, blocks_to_remove, drop_entire_block
+        )
+        validate_budgets(child)
+        validate_quant_reconstruction_files(
+            grouped_layer_names, quant_weights_path, child["quant"]
+        )
+        distance_base = joint_genotype_distance(child, parent_a)
+        distance_donor = joint_genotype_distance(child, parent_b)
+        details.update(
+            {
+                "local_exchange_type": move_type,
+                "changed_gene_count": distance_base,
+                "child_distance_from_base": distance_base,
+                "child_distance_from_donor": distance_donor,
+                "child_distance_from_parent_a": distance_base,
+                "child_distance_from_parent_b": distance_donor,
+                "donor_distance_reduction": details["parent_distance"] - distance_donor,
+            }
+        )
+    except (FileNotFoundError, RuntimeError, ValueError) as error:
+        details["rejection_reason"] = str(error)
+        return None, details
+    assert details["repair_changed_gene_count"] == 0
+    return child, details
+
+
+def new_exchange_diagnostics(state=None):
+    """New checkpoint fields default to zero when resuming V2 checkpoints."""
+    state = state or {}
+    counters = (
+        "crossover_no_legal_exchange",
+        "local_exchange_attention",
+        "local_exchange_mlp",
+        "local_exchange_quantization",
+        "local_exchange_block",
+    )
+    result = {key: int(state.get(key, 0)) for key in counters}
+    for metric in (
+        "parent_distance",
+        "child_distance_from_base",
+        "child_distance_from_donor",
+        "donor_distance_reduction",
+        "local_exchange_changed_gene_count",
+    ):
+        result[metric] = copy.deepcopy(
+            state.get(metric, {"count": 0, "sum": 0, "min": None, "max": None})
+        )
+    return result
+
+
+def record_exchange_distance(diagnostics, metric, value):
+    stats = diagnostics[metric]
+    stats["count"] += 1
+    stats["sum"] += value
+    stats["min"] = value if stats["min"] is None else min(stats["min"], value)
+    stats["max"] = value if stats["max"] is None else max(stats["max"], value)
+
+
+def record_accepted_exchange(diagnostics, details, child, base, donor):
+    """Child distance and subtype statistics count accepted unique offspring."""
+    distance_base = joint_genotype_distance(child, base)
+    distance_donor = joint_genotype_distance(child, donor)
+    record_exchange_distance(diagnostics, "child_distance_from_base", distance_base)
+    record_exchange_distance(diagnostics, "child_distance_from_donor", distance_donor)
+    record_exchange_distance(
+        diagnostics,
+        "donor_distance_reduction",
+        joint_genotype_distance(base, donor) - distance_donor,
+    )
+    if "local_exchange_type" in details:
+        assert details["repair_changed_gene_count"] == 0
+        diagnostics[f"local_exchange_{details['local_exchange_type']}"] += 1
+        record_exchange_distance(
+            diagnostics, "local_exchange_changed_gene_count", distance_base
+        )
+
+
+def summarize_exchange_diagnostics(diagnostics):
+    summary = {}
+    for key, value in diagnostics.items():
+        if isinstance(value, dict):
+            summary[f"{key}_mean"] = (
+                value["sum"] / value["count"] if value["count"] else None
+            )
+            summary[f"{key}_min"] = value["min"]
+            summary[f"{key}_max"] = value["max"]
+            summary[f"{key}_count"] = value["count"]
+        else:
+            summary[key] = value
+    summary["child_distance_statistics_scope"] = "accepted_unique_crossover_offspring"
+    summary["parent_distance_statistics_scope"] = "crossover_attempts"
+    return summary
+
+
 def layer_index(layer_name: str) -> Optional[int]:
     match = LAYER_INDEX_RE.search(layer_name)
     return int(match.group(1)) if match is not None else None
@@ -1312,13 +1598,13 @@ def parse_args(argv=None):
         "--crossover-probability",
         default=0.0,
         type=float,
-        help="Probability that an offspring proposal uses component crossover.",
+        help="Probability that an offspring proposal uses the selected crossover.",
     )
     parser.add_argument(
         "--crossover_type",
         "--crossover-type",
         default="component",
-        choices=["component", "layer_bundle"],
+        choices=["component", "layer_bundle", "local_exchange"],
         help="Crossover operator; defaults to the original whole-component mode.",
     )
     parser.add_argument(
@@ -1989,6 +2275,12 @@ def main():
     crossover_repaired_proposals_total = 0
     crossover_repair_changed_gene_count_total = 0
     mutation_offspring_accepted_total = 0
+    exchange_diagnostics_total = new_exchange_diagnostics()
+    local_exchange_metadata = (
+        build_local_exchange_metadata(model, grouped_layer_names, args.quant_weights_path)
+        if crossover_enabled and args.crossover_type == "local_exchange"
+        else None
+    )
     offspring_attempts_total = 0
     candidate_evaluations_search_cumulative = initial_candidate_evaluations
     evaluation_tokens_search_cumulative = initial_evaluation_tokens
@@ -2132,6 +2424,9 @@ def main():
         mutation_offspring_accepted_total = int(
             state["mutation_offspring_accepted_total"]
         )
+        exchange_diagnostics_total = new_exchange_diagnostics(
+            state.get("exchange_diagnostics_total", {})
+        )
         offspring_attempts_total = int(
             state["offspring_attempts_total"]
         )
@@ -2222,6 +2517,7 @@ def main():
             "mutation_offspring_accepted_total": int(
                 mutation_offspring_accepted_total
             ),
+            "exchange_diagnostics_total": copy.deepcopy(exchange_diagnostics_total),
             "offspring_attempts_total": int(
                 offspring_attempts_total
             ),
@@ -2361,6 +2657,10 @@ def main():
         crossover_layers_from_a = []
         crossover_layers_from_b = []
         mutation_offspring_accepted = 0
+        exchange_diagnostics = new_exchange_diagnostics()
+        if args.crossover_type == "local_exchange":
+            for counts in (mutation_counts, depth_change_totals, quant_change_totals):
+                counts["local exchange crossover"] = 0
 
         while len(offspring_list) < args.offspring:
             offspring_attempts += 1
@@ -2374,6 +2674,7 @@ def main():
                     f"no_op_mutations={no_op_mutations}, "
                     f"duplicate_candidates={duplicate_candidates}, "
                     f"infeasible_candidates={infeasible_candidates}, "
+                    f"crossover_no_legal_exchange={exchange_diagnostics['crossover_no_legal_exchange']}, "
                     f"sequential_mode={args.sequential_mode}, "
                     f"frozen_component={sequential_mode_metadata(args.sequential_mode)[2]}, "
                     "fixed_quant_legal_swap_count="
@@ -2391,11 +2692,23 @@ def main():
                     population, args.crossover_parent_selection
                 )
                 reference_parent = parent_a
-                crossover_function = (
-                    try_component_crossover
-                    if args.crossover_type == "component"
-                    else try_layer_bundle_crossover
-                )
+                for diagnostics in (exchange_diagnostics, exchange_diagnostics_total):
+                    record_exchange_distance(
+                        diagnostics, "parent_distance", joint_genotype_distance(parent_a, parent_b)
+                    )
+                crossover_function = {
+                    "component": try_component_crossover,
+                    "layer_bundle": try_layer_bundle_crossover,
+                    "local_exchange": try_local_exchange_crossover,
+                }[args.crossover_type]
+                local_kwargs = {}
+                if args.crossover_type == "local_exchange":
+                    local_kwargs = {
+                        "model": model,
+                        "metadata": local_exchange_metadata,
+                        "target_cost_bits": target_cost_bits if exact_total_budget else None,
+                        "budget_cost_kwargs": budget_cost_kwargs,
+                    }
                 offspring, crossover_details = crossover_function(
                     parent_a,
                     parent_b,
@@ -2407,8 +2720,11 @@ def main():
                     active_quant_budget=args.active_quant_budget,
                     step_size=args.step_size,
                     drop_entire_block=args.drop_entire_block,
+                    **local_kwargs,
                 )
-                if "parent_distance" in crossover_details:
+                if args.crossover_type == "local_exchange":
+                    assert crossover_details["repair_changed_gene_count"] == 0
+                if "child_distance_from_parent_a" in crossover_details:
                     crossover_parent_distances.append(
                         crossover_details["parent_distance"]
                     )
@@ -2426,6 +2742,10 @@ def main():
                             crossover_details["layers_from_parent_b"]
                         )
                 if offspring is None:
+                    if crossover_details.get("no_legal_exchange", False):
+                        exchange_diagnostics["crossover_no_legal_exchange"] += 1
+                        exchange_diagnostics_total["crossover_no_legal_exchange"] += 1
+                        continue
                     infeasible_candidates += 1
                     crossover_infeasible_candidates += 1
                     crossover_infeasible_candidates_total += 1
@@ -2569,17 +2889,19 @@ def main():
 
             if exact_total_budget:
                 try:
-                    offspring["quant"] = repair_quant_state_to_budget(
-                        model,
-                        grouped_layer_names,
-                        args.quant_weights_path,
-                        offspring["quant"],
-                        offspring["drop"],
-                        target_cost_bits,
-                        preserve_equal_size_group_costs=True,
-                        uniform_reference_bitwidth=int(args.target_bitwidth),
-                        **budget_cost_kwargs,
-                    )
+                    # Local exchange is validated only: never repair its child.
+                    if not (use_crossover and args.crossover_type == "local_exchange"):
+                        offspring["quant"] = repair_quant_state_to_budget(
+                            model,
+                            grouped_layer_names,
+                            args.quant_weights_path,
+                            offspring["quant"],
+                            offspring["drop"],
+                            target_cost_bits,
+                            preserve_equal_size_group_costs=True,
+                            uniform_reference_bitwidth=int(args.target_bitwidth),
+                            **budget_cost_kwargs,
+                        )
                     offspring_cost = candidate_compression_cost(
                         model,
                         offspring,
@@ -2619,6 +2941,8 @@ def main():
             if use_crossover:
                 crossover_offspring_accepted += 1
                 crossover_offspring_accepted_total += 1
+                for diagnostics in (exchange_diagnostics, exchange_diagnostics_total):
+                    record_accepted_exchange(diagnostics, crossover_details, offspring, parent_a, parent_b)
             else:
                 mutation_offspring_accepted += 1
                 mutation_offspring_accepted_total += 1
@@ -2632,6 +2956,10 @@ def main():
                 interaction_aware_totals[
                     "fallback_quant_exchanges_used"
                 ] += int(interaction_details["fallback_quant_exchange_used"])
+
+        if args.crossover_type == "local_exchange":
+            assert crossover_repaired_proposals_total == 0
+            assert crossover_repair_changed_gene_count_total == 0
 
         stage_candidate_evaluations = []
         stage_evaluation_tokens = []
@@ -2845,6 +3173,8 @@ def main():
                             args.crossover_parent_selection
                         ),
                         "crossover_offspring": crossover_offspring_accepted,
+                        "crossover_offspring_accepted": crossover_offspring_accepted,
+                        "mutation_offspring_accepted": mutation_offspring_accepted,
                         "mutation_offspring": mutation_offspring_accepted,
                         "crossover_offspring_attempted": (
                             crossover_offspring_attempted
@@ -2899,6 +3229,11 @@ def main():
                             if crossover_layers_from_b
                             else None
                         ),
+                        **{
+                            key: value for key, value in summarize_exchange_diagnostics(exchange_diagnostics).items()
+                            # Preserve V2 parent-distance reporting for old operators.
+                            if args.crossover_type == "local_exchange" or not key.startswith("parent_distance_")
+                        },
                         "persistent_population_size": len(population),
                         "unique_population_size": unique_candidate_count(
                             population
@@ -3152,6 +3487,7 @@ def main():
         depth_counts_valid=final_depth_counts_valid,
     )
     crossover_summary = {
+        **summarize_exchange_diagnostics(exchange_diagnostics_total),
         "population_size": args.population_size,
         "crossover_probability": args.crossover_probability,
         "crossover_type": args.crossover_type,
@@ -3169,6 +3505,8 @@ def main():
         ),
         "mutation_offspring_accepted": mutation_offspring_accepted_total,
         "population_unique_count": unique_candidate_count(population),
+        "persistent_population_size": len(population),
+        "unique_population_size": unique_candidate_count(population),
         "effective_final_survivor_count": effective_selection_survivors[-1],
     }
     reporter.write_summary(

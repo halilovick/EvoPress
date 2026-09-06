@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import csv
 import os
 import subprocess
@@ -59,6 +61,14 @@ class RunJointSearchTinyTest(unittest.TestCase):
                 },
                 "joint_g20_layerbundle_xover_pop4_seed0",
             ),
+            (
+                {
+                    "POPULATION_SIZE": "4",
+                    "CROSSOVER_PROBABILITY": "0.25",
+                    "CROSSOVER_TYPE": "local_exchange",
+                },
+                "joint_g20_localexchange_xover_pop4_seed0",
+            ),
         ]
         with tempfile.TemporaryDirectory() as temp_dir:
             for condition, expected_run_id in conditions:
@@ -115,6 +125,25 @@ class RunJointSearchTinyTest(unittest.TestCase):
             self.assertIn("--crossover_type layer_bundle", result.stdout)
             self.assertIn("--crossover_parent_selection diversity", result.stdout)
             self.assertFalse(output_dir.exists())
+
+    def test_dry_run_supports_local_exchange_and_explicit_diversity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for selection, suffix in (("uniform", ""), ("diversity", "_diversity")):
+                with self.subTest(selection=selection):
+                    result = self.run_command(
+                        [str(LAUNCHER), "--dry-run"],
+                        {
+                            "OUTPUTS_ROOT": temp_dir, "OUTPUT_DIR": "", "RUN_ID": "",
+                            "CROSSOVER_TYPE": "local_exchange", "CROSSOVER_PROBABILITY": "0.25",
+                            "CROSSOVER_PARENT_SELECTION": selection, "POPULATION_SIZE": "4",
+                            "GENERATIONS": "20", "SEED": "0",
+                        },
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("--crossover_type local_exchange", result.stdout)
+                    self.assertIn(f"--crossover_parent_selection {selection}", result.stdout)
+                    self.assertIn(f"joint_g20_localexchange_xover{suffix}_pop4_seed0", result.stdout)
+                    self.assertEqual(list(Path(temp_dir).iterdir()), [])
 
     def test_crossover_rejects_sequential_mode_without_side_effects(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
