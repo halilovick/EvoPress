@@ -1523,8 +1523,10 @@ def parse_args(argv=None):
         "--allow_exact_budget_ablation",
         action="store_true",
         help=(
-            "Explicitly opt into interaction-aware mutation under the exact "
-            "total-model budget. Standard reproduction runs do not need this flag."
+            "Explicitly opt into either interaction-aware mutation or "
+            "depth_to_joint_warm initialization with standard mutation under "
+            "the exact total-model budget. These ablations cannot be combined. "
+            "Standard reproduction runs do not need this flag."
         ),
     )
     parser.add_argument(
@@ -1751,6 +1753,15 @@ def validate_crossover_configuration(args) -> None:
         )
 
 
+def is_exact_budget_depth_warm_ablation(args):
+    return (
+        args.compression_budget_mode == "match_uniform_quantization_total"
+        and args.sequential_mode == "depth_to_joint_warm"
+        and args.joint_mutation_mode == "standard"
+        and getattr(args, "allow_exact_budget_ablation", False)
+    )
+
+
 def validate_joint_search_args(args):
     if len(args.survivors_per_selection) != len(args.tokens_per_selection):
         raise ValueError(
@@ -1758,14 +1769,16 @@ def validate_joint_search_args(args):
         )
     if args.survivors_per_selection[-1] != 1:
         raise ValueError("The final selection stage must have one survivor.")
+    exact_depth_warm_ablation = is_exact_budget_depth_warm_ablation(args)
     if args.skip_initial_single_candidate_evaluation and (
         args.initially_generated != 1
         or args.population_size != 1
-        or args.sequential_mode != "none"
+        or (args.sequential_mode != "none" and not exact_depth_warm_ablation)
     ):
         raise ValueError(
             "--skip_initial_single_candidate_evaluation requires initially_generated=1, "
-            "population_size=1, and sequential_mode=none."
+            "population_size=1, and sequential_mode=none or an explicitly enabled "
+            "exact-budget depth_to_joint_warm ablation with --allow_exact_budget_ablation."
         )
     if args.active_quant_budget and args.group_rule != "size":
         raise ValueError("--active_quant_budget requires --group_rule size.")
@@ -1810,10 +1823,31 @@ def validate_joint_search_args(args):
         raise ValueError(
             "Joint-aware mutation must be evaluated as a separate exact-budget ablation."
         )
-    if exact_total_budget and args.sequential_mode != "none":
+    if (
+        exact_total_budget
+        and args.sequential_mode != "none"
+        and not exact_depth_warm_ablation
+    ):
         raise ValueError(
-            "Sequential initialization is outside the first exact-budget comparison."
+            "Sequential initialization is outside the first exact-budget comparison. "
+            "Only depth_to_joint_warm with standard mutation is supported as a "
+            "separate ablation with --allow_exact_budget_ablation."
         )
+    if exact_depth_warm_ablation:
+        if (
+            args.initially_generated != 1
+            or args.population_size != 1
+            or args.crossover_probability != 0.0
+        ):
+            raise ValueError(
+                "The exact-budget depth_to_joint_warm ablation requires "
+                "initially_generated=1, population_size=1, and crossover_probability=0."
+            )
+        if args.adaptive_mutation or args.coarse_to_fine_mutation:
+            raise ValueError(
+                "The exact-budget depth_to_joint_warm ablation requires standard "
+                "mutation without adaptive or coarse-to-fine mutation."
+            )
     if (
         args.joint_mutation_mode == "interaction_aware"
         and not args.active_quant_budget
@@ -1864,6 +1898,7 @@ def validate_joint_search_args(args):
 def main():
     args = parse_args()
     validate_joint_search_args(args)
+    exact_depth_warm_ablation = is_exact_budget_depth_warm_ablation(args)
     effective_selection_survivors = effective_survivors_per_selection(
         args.survivors_per_selection,
         args.population_size,
@@ -2149,6 +2184,18 @@ def main():
                 args.target_bitwidth,
                 args.step_size,
             )
+        if exact_depth_warm_ablation:
+            repaired_quant = repair_quant_state_to_budget(
+                model,
+                grouped_layer_names,
+                args.quant_weights_path,
+                repaired_quant,
+                stage1_import.component,
+                target_cost_bits,
+                preserve_equal_size_group_costs=True,
+                uniform_reference_bitwidth=int(args.target_bitwidth),
+                **budget_cost_kwargs,
+            )
         initial_repair_changed_gene_names = changed_quant_gene_names(
             grouped_layer_names,
             initial_quant,
@@ -2407,6 +2454,17 @@ def main():
         # Preserve resume compatibility with pre-V2 component/uniform checkpoints.
         checkpoint_identity["crossover_parent_selection"] = (
             args.crossover_parent_selection
+        )
+    if exact_depth_warm_ablation:
+        # Keep old identities unchanged; a replacement mask at the same path
+        # must not silently change the provenance of a resumed warm search.
+        checkpoint_identity.update(
+            exact_budget_ablation="depth_to_joint_warm",
+            allow_exact_budget_ablation=args.allow_exact_budget_ablation,
+            stage1_candidate_hash=stage1_import.component_hash,
+            skip_initial_single_candidate_evaluation=(
+                args.skip_initial_single_candidate_evaluation
+            ),
         )
 
     checkpoint_path = os.path.join(
@@ -3566,6 +3624,30 @@ def main():
         active_budget_valid=final_active_budget_valid,
         depth_counts_valid=final_depth_counts_valid,
     )
+    exact_depth_warm_summary = {}
+    if exact_depth_warm_ablation:
+        # Use the checkpoint-restored initial parent when resuming. Source
+        # optimization is separate compute, never added to joint-search totals.
+        initial_cost = candidate_compression_cost(
+            model,
+            initial_parent,
+            grouped_layer_names=grouped_layer_names,
+            **budget_cost_kwargs,
+        )
+        validate_exact_budget(
+            initial_cost, target_cost_bits, context="reported initial warm candidate"
+        )
+        exact_depth_warm_summary = {
+            "exact_budget_ablation": "depth_to_joint_warm",
+            "initial_compression_cost_bits": initial_cost["total_cost_bits"],
+            "initial_compression_difference_bits": (
+                initial_cost["total_cost_bits"] - target_cost_bits
+            ),
+            "initial_evaluation_skipped": args.skip_initial_single_candidate_evaluation,
+            "stage1_summary_path": stage1_import.summary_path,
+            "stage1_source_metadata": copy.deepcopy(stage1_artifacts.summary),
+            "stage1_compute_included_in_search_totals": False,
+        }
     crossover_summary = {
         **summarize_exchange_diagnostics(exchange_diagnostics_total),
         "population_size": args.population_size,
@@ -3750,7 +3832,11 @@ def main():
                 stage1_import.candidate_path if stage1_import else None
             ),
         },
-        extra_summary={**sequential_summary, **crossover_summary},
+        extra_summary={
+            **sequential_summary,
+            **crossover_summary,
+            **exact_depth_warm_summary,
+        },
     )
 
 

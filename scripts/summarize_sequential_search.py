@@ -263,10 +263,24 @@ def read_generation_statistics(path: Path) -> dict[str, Any]:
 
 
 def search_effort(search: Mapping[str, Any]) -> dict[str, int]:
-    initial_candidates = int(
-        search.get("initial_candidates_evaluated", search["initial_candidates"])
-    )
+    recorded_evaluations = search.get("candidate_evaluations_search_total")
+    recorded_tokens = search.get("evaluation_tokens_search_total")
+    if recorded_evaluations is not None and recorded_tokens is not None:
+        return {
+            "candidate_evaluations": int(recorded_evaluations),
+            "evaluated_tokens": int(recorded_tokens),
+        }
+
+    initial_candidates = search.get("initial_candidate_evaluations")
+    if initial_candidates is None:
+        initial_candidates = search.get("initial_candidates_evaluated")
+    if initial_candidates is None:
+        initial_candidates = search["initial_candidates"]
+    initial_candidates = int(initial_candidates)
     initial_tokens = int(search["initial_tokens"])
+    initial_evaluation_tokens = int(
+        search.get("initial_evaluation_tokens", initial_candidates * initial_tokens)
+    )
     generations = int(search["generations"])
     offspring = int(search["offspring"])
     survivors = [int(value) for value in search["selection_survivors"]]
@@ -287,11 +301,14 @@ def search_effort(search: Mapping[str, Any]) -> dict[str, int]:
 
     return {
         "candidate_evaluations": (
-            initial_candidates + generations * per_generation_evaluations
+            int(recorded_evaluations)
+            if recorded_evaluations is not None
+            else initial_candidates + generations * per_generation_evaluations
         ),
         "evaluated_tokens": (
-            initial_candidates * initial_tokens
-            + generations * per_generation_tokens
+            int(recorded_tokens)
+            if recorded_tokens is not None
+            else initial_evaluation_tokens + generations * per_generation_tokens
         ),
     }
 
