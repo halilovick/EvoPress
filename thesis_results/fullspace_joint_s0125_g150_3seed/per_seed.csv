@@ -1,0 +1,4 @@
+seed,wikitext2_ppl,c4_ppl,train_ppl,final_calibration_kl,best_search_fitness,compression_cost_bits,compression_difference_bits,exact_budget_valid,runtime_seconds,candidate_evaluations,search_tokens,final_quant_bit_average_reported,run_dir
+0,6.4140625,9.6015625,7.7734375,0.19921875,0.2042236328125,26982023168,0,True,124765.24576133594,22350,176947200,3.4405,/home/jovyan/evopress_extension_results/fullspace_joint_s0125_g150/fullspace_joint_s0125_g150_seed0_attempt1
+1,6.89453125,9.734375,7.94140625,0.2154541015625,0.2208251953125,26982023168,0,True,123604.33500083804,22350,176947200,3.4657,/home/jovyan/evopress_extension_results/fullspace_joint_s0125_g150/fullspace_joint_s0125_g150_seed1_attempt1
+2,6.5546875,9.6015625,7.8671875,0.2105712890625,0.21240234375,26982023168,0,True,122353.13424429903,22350,176947200,3.485,/home/jovyan/evopress_extension_results/fullspace_joint_s0125_g150/fullspace_joint_s0125_g150_seed2_attempt1

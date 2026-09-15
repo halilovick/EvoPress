@@ -1,0 +1,118 @@
+{
+  "experiment": "fullspace_joint_s0125_g150_3seed",
+  "created_utc": "2026-09-15T08:11:13.394845+00:00",
+  "model": "mistralai/Mistral-7B-v0.3",
+  "structural_sparsity": 0.125,
+  "dropped_attention_modules": 4,
+  "dropped_mlp_modules": 4,
+  "generations": 150,
+  "offspring_per_generation": 128,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "target_cost_bits": 26982023168,
+  "target_size_gib": 3.1411209106445312,
+  "all_exact_budget_valid": true,
+  "all_budget_differences_zero": true,
+  "primary_dispersion_convention": "population standard deviation",
+  "metrics": {
+    "wikitext2_ppl": {
+      "values": [
+        6.4140625,
+        6.89453125,
+        6.5546875
+      ],
+      "mean": 6.62109375,
+      "population_sd": 0.20169266630352478,
+      "sample_sd": 0.24702205865253715
+    },
+    "c4_ppl": {
+      "values": [
+        9.6015625,
+        9.734375,
+        9.6015625
+      ],
+      "mean": 9.645833333333334,
+      "population_sd": 0.06260841291755889,
+      "sample_sd": 0.07667933262674717
+    },
+    "train_ppl": {
+      "values": [
+        7.7734375,
+        7.94140625,
+        7.8671875
+      ],
+      "mean": 7.860677083333333,
+      "population_sd": 0.06872730843956587,
+      "sample_sd": 0.08417341853590618
+    },
+    "final_calibration_kl": {
+      "values": [
+        0.19921875,
+        0.2154541015625,
+        0.2105712890625
+      ],
+      "mean": 0.20841471354166666,
+      "population_sd": 0.00680121428238056,
+      "sample_sd": 0.008329752311580818
+    }
+  },
+  "reported_final_quant_bit_averages": [
+    3.4405,
+    3.4657,
+    3.485
+  ],
+  "reported_final_quant_bit_average_mean": 3.4637333333333333,
+  "runs": [
+    {
+      "seed": 0,
+      "wikitext2_ppl": 6.4140625,
+      "c4_ppl": 9.6015625,
+      "train_ppl": 7.7734375,
+      "final_calibration_kl": 0.19921875,
+      "best_search_fitness": 0.2042236328125,
+      "compression_cost_bits": 26982023168,
+      "compression_difference_bits": 0,
+      "exact_budget_valid": true,
+      "runtime_seconds": 124765.24576133594,
+      "candidate_evaluations": 22350,
+      "search_tokens": 176947200,
+      "final_quant_bit_average_reported": 3.4405,
+      "run_dir": "/home/jovyan/evopress_extension_results/fullspace_joint_s0125_g150/fullspace_joint_s0125_g150_seed0_attempt1"
+    },
+    {
+      "seed": 1,
+      "wikitext2_ppl": 6.89453125,
+      "c4_ppl": 9.734375,
+      "train_ppl": 7.94140625,
+      "final_calibration_kl": 0.2154541015625,
+      "best_search_fitness": 0.2208251953125,
+      "compression_cost_bits": 26982023168,
+      "compression_difference_bits": 0,
+      "exact_budget_valid": true,
+      "runtime_seconds": 123604.33500083804,
+      "candidate_evaluations": 22350,
+      "search_tokens": 176947200,
+      "final_quant_bit_average_reported": 3.4657,
+      "run_dir": "/home/jovyan/evopress_extension_results/fullspace_joint_s0125_g150/fullspace_joint_s0125_g150_seed1_attempt1"
+    },
+    {
+      "seed": 2,
+      "wikitext2_ppl": 6.5546875,
+      "c4_ppl": 9.6015625,
+      "train_ppl": 7.8671875,
+      "final_calibration_kl": 0.2105712890625,
+      "best_search_fitness": 0.21240234375,
+      "compression_cost_bits": 26982023168,
+      "compression_difference_bits": 0,
+      "exact_budget_valid": true,
+      "runtime_seconds": 122353.13424429903,
+      "candidate_evaluations": 22350,
+      "search_tokens": 176947200,
+      "final_quant_bit_average_reported": 3.485,
+      "run_dir": "/home/jovyan/evopress_extension_results/fullspace_joint_s0125_g150/fullspace_joint_s0125_g150_seed2_attempt1"
+    }
+  ]
+}
