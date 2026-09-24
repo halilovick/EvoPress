@@ -1,0 +1,36 @@
+{
+  "method": "interaction_aware_joint",
+  "model": "mistralai/Mistral-7B-v0.3",
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "generations": 150,
+  "offspring": 128,
+  "drop_sparsity": 0.25,
+  "dropped_attention": 8,
+  "dropped_mlp": 8,
+  "target_cost_bits": 26982023168,
+  "candidate_evaluations_per_seed": 22350,
+  "evaluation_tokens_per_seed": 176947200,
+  "dispersion_convention": "population_sd",
+  "interaction_aware": {
+    "wikitext2_mean": 10.205729166666666,
+    "wikitext2_population_sd": 0.6445299347629678,
+    "c4_mean": 13.434895833333334,
+    "c4_population_sd": 0.22392805027818397
+  },
+  "standard_joint": {
+    "wikitext2_mean": 8.9609375,
+    "wikitext2_population_sd": 0.11535018015807344,
+    "c4_mean": 12.497395833333334,
+    "c4_population_sd": 0.12889967365379773
+  },
+  "matched_delta_ia_minus_standard": {
+    "wikitext2_mean": 1.2447916666666667,
+    "wikitext2_population_sd": 0.5656139693522331,
+    "c4_mean": 0.9375,
+    "c4_population_sd": 0.25347519499778803
+  }
+}
