@@ -159,6 +159,7 @@ class ExactBudgetDepthWarmTest(unittest.TestCase):
             stage1_artifacts=artifacts, stage1_import=imported,
             exact_total_budget=args.compression_budget_mode == "match_uniform_quantization_total",
             exact_depth_warm_ablation=search.is_exact_budget_depth_warm_ablation(args),
+            exact_sequential_ablation=search.is_exact_budget_sequential_ablation(args),
             target_cost_bits=self.target, budget_cost_kwargs=self.cost_kwargs,
             effective_selection_survivors=search.effective_survivors_per_selection(
                 args.survivors_per_selection, args.population_size
@@ -235,7 +236,9 @@ class ExactBudgetDepthWarmTest(unittest.TestCase):
             self.assertTrue(search.is_exact_budget_depth_warm_ablation(args))
 
     def test_other_sequential_modes_and_combined_interaction_remain_rejected(self):
-        for mode in ("depth_to_quant_frozen", "quant_to_depth_frozen", "quant_to_joint_warm"):
+        # depth_to_quant_frozen is the separately tested exact-budget sequential
+        # baseline (see the test_frozen_* tests below).
+        for mode in ("quant_to_depth_frozen", "quant_to_joint_warm"):
             with self.subTest(mode=mode):
                 args = self.warm_cli()
                 args.sequential_mode = mode
@@ -518,6 +521,69 @@ class ExactBudgetDepthWarmTest(unittest.TestCase):
         self.assertEqual(search_effort(summary["search_config"]), {
             "candidate_evaluations": 2980, "evaluated_tokens": 23_592_960,
         })
+
+    # -- Exact-budget structure-first sequential baseline (frozen mask) -------
+
+    def frozen_cli(self, *extra):
+        return self.exact_cli(
+            "--sequential_mode", "depth_to_quant_frozen",
+            "--stage1_run_dir", str(self.source_dir),
+            "--allow_exact_budget_ablation",
+            "--skip_initial_single_candidate_evaluation", *extra,
+        )
+
+    def test_frozen_exact_requires_opt_in_and_validates_with_it(self):
+        args = self.frozen_cli()
+        search.validate_joint_search_args(args)
+        self.assertTrue(search.is_exact_budget_depth_frozen_ablation(args))
+        self.assertFalse(search.is_exact_budget_depth_warm_ablation(args))
+        self.assertTrue(search.is_exact_budget_sequential_ablation(args))
+        for skip in (False, True):
+            args = self.frozen_cli()
+            args.skip_initial_single_candidate_evaluation = skip
+            args.allow_exact_budget_ablation = False
+            with self.assertRaises(ValueError):
+                search.validate_joint_search_args(args)
+        args = self.frozen_cli()
+        args.population_size = 2
+        with self.assertRaises(ValueError):
+            search.validate_joint_search_args(args)
+
+    def test_frozen_exact_initialization_keeps_mask_and_meets_budget(self):
+        random.seed(0)
+        with patch.object(search, "repair_quant_state_to_budget", wraps=search.repair_quant_state_to_budget) as repair:
+            state = self.initialize(self.frozen_cli())
+        repair.assert_called_once()
+        self.assertEqual(repair.call_args.args[3], [[3] * len(g) for g in self.groups])
+        self.assertEqual(state["parent"]["drop"], self.drop)
+        self.assertEqual(self.cost(state["parent"])["total_cost_bits"], self.target)
+
+    def test_frozen_exact_offspring_keep_mask_and_exchange_active_genes_only(self):
+        random.seed(3)
+        state = self.initialize(self.frozen_cli("--offspring", "1"))
+        before = copy.deepcopy(state["parent"])
+        for name in ("mutate_drop_state", "mutate_interaction_aware_candidate", "mutate_fixed_quant_depth_candidate"):
+            state[name] = Mock(side_effect=AssertionError(name))
+        state["mutate_quant_state"] = Mock(wraps=search.mutate_quant_state)
+        child = self.offspring(state)
+        self.assertEqual(state["offspring_mutation_types"], ["sequential_quantization"])
+        self.assertEqual(child["drop"], before["drop"])
+        self.assertEqual(state["mutate_quant_state"].call_args.args[5], before["drop"])
+        changed = [
+            name for g, group in enumerate(self.groups) for i, name in enumerate(group)
+            if child["quant"][g][i] != before["quant"][g][i]
+        ]
+        self.assertEqual(len(changed), 2)
+        self.assertTrue(all(search.quant_layer_is_active(name, child["drop"]) for name in changed))
+        self.assertEqual(self.cost(child)["total_cost_bits"], self.target)
+
+    def test_frozen_exact_identity_and_summary_record_the_mode(self):
+        random.seed(0)
+        state = self.initialize(self.frozen_cli())
+        identity = self.identity(state)
+        self.assertEqual(identity["exact_budget_ablation"], "depth_to_quant_frozen")
+        self.assertEqual(identity["stage1_candidate_hash"], search.stable_json_hash(self.drop))
+        self.assertEqual(self.warm_summary(state)["exact_budget_ablation"], "depth_to_quant_frozen")
 
     def test_missing_source_metadata_is_not_invented(self):
         (self.source_dir / "run_summary.json").unlink()
