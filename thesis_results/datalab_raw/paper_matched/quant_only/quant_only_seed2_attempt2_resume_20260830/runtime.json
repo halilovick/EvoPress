@@ -1,0 +1,58 @@
+{
+  "attempt_id": "e34becc158494da09061d7cfbc876134",
+  "child_runtime_seconds": 30832.04969015182,
+  "ended_unix_seconds": 1788127574.9026606,
+  "exit_code": 0,
+  "postflight_status": "passed",
+  "resource_samples_path": "/home/jovyan/evopress/results/apples_to_apples/paper_matched/quant_only/quant_only_seed2_attempt2_resume_20260830/resource_samples.jsonl",
+  "resource_summary": {
+    "attempt_id": "e34becc158494da09061d7cfbc876134",
+    "baseline": {
+      "current_bytes": 17161183232,
+      "events": {
+        "high": 0,
+        "low": 0,
+        "max": 169173,
+        "oom": 0,
+        "oom_kill": 0
+      },
+      "limit_bytes": 17179869184,
+      "peak_bytes": null
+    },
+    "child_pid": 696,
+    "event_deltas": {
+      "high": 0,
+      "low": 0,
+      "max": 245315,
+      "oom": 0,
+      "oom_kill": 0
+    },
+    "final": {
+      "current_bytes": 9938841600,
+      "events": {
+        "high": 0,
+        "low": 0,
+        "max": 414488,
+        "oom": 0,
+        "oom_kill": 0
+      },
+      "limit_bytes": 17179869184,
+      "peak_bytes": null
+    },
+    "final_process_tree": {
+      "pids": [],
+      "process_count": 0,
+      "root_pid": 696,
+      "rss_bytes": 0,
+      "supported": true
+    },
+    "max_current_bytes_observed": 17179869184,
+    "max_peak_bytes_observed": null,
+    "max_process_count_observed": 1,
+    "max_process_tree_rss_bytes_observed": 4827004928,
+    "process_group_id": 696,
+    "sampling_interval_seconds": 5
+  },
+  "runtime_seconds": 30832.07213238394,
+  "started_unix_seconds": 1788096742.830527
+}

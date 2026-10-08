@@ -1,0 +1,5 @@
+Run externally interrupted after generation 44 completed.
+generation_log.csv contains completed generations 1-44.
+No final candidate or run summary was produced.
+The existing implementation did not yet persist generation-level search state,
+so exact continuation from generation 45 is not possible.

@@ -1,0 +1,3 @@
+Run externally interrupted during dense teacher-logit computation after DataLab/kernel reset.
+No evolutionary generation had started.
+Original launcher_status.json remained stale at status=running because the launcher was terminated externally.

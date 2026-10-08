@@ -1,0 +1,51 @@
+{
+  "artifacts": {
+    "candidate_path": "/home/jovyan/evopress/results/apples_to_apples/paper_matched/dense/dense_seed0_20260819/final_candidate.json",
+    "resolved_config_path": "/home/jovyan/evopress/results/apples_to_apples/paper_matched/dense/dense_seed0_20260819/resolved_config.json",
+    "stdout_log_path": "/home/jovyan/evopress/results/apples_to_apples/paper_matched/dense/dense_seed0_20260819/run.log"
+  },
+  "compression_config": {
+    "compression_budget_mode": "match_uniform_quantization_total",
+    "include_quantization_metadata": false,
+    "target_average_bitwidth": null,
+    "target_cost_bits": 115968376832
+  },
+  "dataset_calibration": null,
+  "dataset_eval": [
+    "wikitext2",
+    "c4"
+  ],
+  "final_metrics": {
+    "best_search_fitness": null,
+    "c4_ppl": 7.71,
+    "compression_difference_bits": 0,
+    "compression_realized_bits": 115968376832,
+    "compression_target_bits": 115968376832,
+    "estimated_compression_ratio": 1.0,
+    "estimated_weight_memory_mb": 13824.5078125,
+    "final_calibration_kl": null,
+    "fineweb_ppl": null,
+    "runtime_seconds": 202.55311404098757,
+    "wikitext2_ppl": 4.83
+  },
+  "git_commit": "26284c071755eb04e3e71cbd0f77017fae28b6ea",
+  "model_name": "mistralai/Mistral-7B-v0.3",
+  "model_size_statistics": {
+    "compression_cost_bits": 115968376832,
+    "dense_weight_memory_mb": 13824.5078125,
+    "estimated_compression_ratio": 1.0,
+    "estimated_weight_memory_mb": 13824.5078125
+  },
+  "quantization_statistics": {
+    "bitwidth_by_module": {},
+    "quantized_module_count": 0
+  },
+  "run_name": "dense_seed0_20260819",
+  "schema_version": 3,
+  "search_config": {
+    "candidate_evaluations_search_total": 0,
+    "seed": 0
+  },
+  "search_type": "dense",
+  "timestamp_end": "2026-08-19T17:25:21Z"
+}

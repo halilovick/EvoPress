@@ -1,0 +1,5 @@
+condition,run,git_commit,seed,population_size,crossover_probability,crossover_type,parent_selection,final_kl,wikitext2_ppl,train_ppl,runtime_seconds,crossover_attempted,crossover_accepted,crossover_duplicates,crossover_infeasible,crossover_repaired,crossover_repair_gene_changes
+A_mutation_pop1,joint_g20_mutation_pop1_seed0,ae43aef686b42560183644177fcef9d4b783c457,0,1,0.0,component,uniform,0.7939453125,13.3828125,13.5078125,991.0,0,0,0,0,0,0
+B_population_pop4,joint_g20_population_pop4_seed0,ae43aef686b42560183644177fcef9d4b783c457,0,4,0.0,component,uniform,0.740234375,12.4453125,12.7421875,1319.0,0,0,0,0,0,0
+C_component_xover,joint_g20_component_xover_pop4_seed0,ae43aef686b42560183644177fcef9d4b783c457,0,4,0.25,component,uniform,0.7724609375,12.6640625,13.09375,1404.0,107,22,85,0,10,10
+D_layerbundle_xover,joint_g20_layerbundle_xover_pop4_seed0,ae43aef686b42560183644177fcef9d4b783c457,0,4,0.25,layer_bundle,uniform,0.8623046875,14.1015625,14.15625,1338.0,87,71,16,0,66,107

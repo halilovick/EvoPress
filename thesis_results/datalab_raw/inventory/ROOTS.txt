@@ -1,0 +1,8 @@
+/home/jovyan/evopress
+/home/jovyan/evopress-crossover-v2
+/home/jovyan/evopress-crossover-v3
+/home/jovyan/evopress_backups
+/home/jovyan/evopress_extension_results
+/home/jovyan/evopress_quant
+/home/jovyan/evopress_quant_stage1_1gpu_diskspill_attempt3_20260819
+/home/jovyan/thesis_backups

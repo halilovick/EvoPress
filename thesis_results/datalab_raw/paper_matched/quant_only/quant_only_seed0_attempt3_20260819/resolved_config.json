@@ -1,0 +1,141 @@
+{
+  "attempt_id": "be70d3926efd4c89b2f0742681a9a017",
+  "configuration": {
+    "attention_implementation": "flash_attention_2",
+    "budget": {
+      "dense_dtype_bits": 16,
+      "drop_entire_block": false,
+      "include_quantization_metadata": true,
+      "joint_drop_sparsity": 0.25,
+      "mode": "match_uniform_quantization_total",
+      "reference_dense_bits": 115968376832,
+      "reference_dense_parameters": 7248023552,
+      "reference_fixed_parameters": 268701696,
+      "reference_metadata_inclusive_compression_ratio": 4.297986704330444,
+      "reference_metadata_inclusive_target_bits": 26982023168,
+      "reference_metadata_inclusive_target_bytes": 3372752896,
+      "reference_metadata_inclusive_target_mib": 3216.5078125,
+      "reference_paper_weight_only_target_bits": 25237192704,
+      "reference_quantized_parameters": 6979321856,
+      "scale_bits": 16,
+      "uniform_target_bitwidth": 3,
+      "zero_point_bits": 16
+    },
+    "dtype": "float16",
+    "model": "mistralai/Mistral-7B-v0.3",
+    "profile": "paper_matched",
+    "quant_database": {
+      "activation_order": false,
+      "attention_implementation": "flash_attention_2",
+      "bitwidths": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "block_size": 128,
+      "calibration_bitwidth": 3,
+      "calibration_data": "fineweb_edu",
+      "calibration_tokens": 8388608,
+      "expected_modules": 224,
+      "expected_reconstruction_dtype": "float16",
+      "expected_reconstruction_shapes": {
+        "down_proj": [
+          4096,
+          14336
+        ],
+        "gate_proj": [
+          14336,
+          4096
+        ],
+        "k_proj": [
+          1024,
+          4096
+        ],
+        "o_proj": [
+          4096,
+          4096
+        ],
+        "q_proj": [
+          4096,
+          4096
+        ],
+        "up_proj": [
+          14336,
+          4096
+        ],
+        "v_proj": [
+          1024,
+          4096
+        ]
+      },
+      "group_size": 128,
+      "perchannel": true,
+      "quantizable_modules": ".*layers.*((q|k|v|o|gate|up|down)_proj)$",
+      "relative_dampening": 0.01,
+      "save_root": "outputs/apples_to_apples/quant_database",
+      "sequence_length": 8192,
+      "symmetric": false,
+      "torchrun_processes": 8
+    },
+    "results_root": "results/apples_to_apples",
+    "schema_version": 1,
+    "search": {
+      "calibration_data": "fineweb_edu",
+      "calibration_tokens": 524288,
+      "crossover_probability": 0.0,
+      "eval_datasets": [
+        "wikitext2",
+        "c4"
+      ],
+      "eval_every": 5,
+      "eval_sequence_length": 8192,
+      "eval_tokens": 524288,
+      "fitness": "kl",
+      "generations": 150,
+      "group_rule": "size",
+      "initial_tokens": 2048,
+      "joint_initial_candidates": 1,
+      "joint_mutation_mode": "standard",
+      "max_drop_mutations": 3,
+      "offspring": 128,
+      "population_size": 1,
+      "quant_initial_candidates": 1,
+      "selection_tokens": [
+        2048,
+        16384,
+        131072
+      ],
+      "sequence_length": 8192,
+      "skip_joint_single_initial_evaluation": true,
+      "skip_quant_uniform_initial_evaluation": true,
+      "step_size": 1,
+      "survivors": [
+        16,
+        4,
+        1
+      ]
+    },
+    "use_fast_tokenizer": false
+  },
+  "expected_search_compute": {
+    "candidate_evaluations": 22350,
+    "candidate_tokens": 176947200
+  },
+  "git_commit": "26284c071755eb04e3e71cbd0f77017fae28b6ea",
+  "memory_preflight": null,
+  "method": "quant_only",
+  "output_dir": "/home/jovyan/evopress/results/apples_to_apples/paper_matched/quant_only/quant_only_seed0_attempt3_20260819",
+  "quant_database": "/home/jovyan/evopress_quant_stage1_1gpu_diskspill_attempt3_20260819/Mistral-7B-v0.3/3bit",
+  "resolved_at": "2026-08-19T18:07:51Z",
+  "runtime_overrides": {
+    "activation_cache_dir": null,
+    "configured_torchrun_processes": null,
+    "database_memory_mode": null,
+    "effective_torchrun_processes": null
+  },
+  "seed": 0,
+  "source_config": "/home/jovyan/evopress/configs/apples_to_apples/mistral7b_v03_paper_matched.json",
+  "storage_preflight": null
+}

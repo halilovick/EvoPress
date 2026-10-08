@@ -1,0 +1,13 @@
+Snapshot date: Tue Sep  1 07:44:32 UTC 2026
+
+Branch:
+agent/evopress-apples-stage1
+
+Commit:
+6d3f04608a74182ba5b974f26f62153553a0fc24
+
+Status:
+ M requirements.txt
+ M results/experiment_log.csv
+?? results/apples_to_apples/
+?? results/attribution/mistral_attention_full_seed2_partial_20260704_015117/

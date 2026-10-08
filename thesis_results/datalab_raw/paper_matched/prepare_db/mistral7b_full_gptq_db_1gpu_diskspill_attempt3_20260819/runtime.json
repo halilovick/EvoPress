@@ -1,0 +1,58 @@
+{
+  "attempt_id": "5dabb758983a4a66b38425feef762abb",
+  "child_runtime_seconds": 25661.895218788937,
+  "ended_unix_seconds": 1787157510.8475814,
+  "exit_code": 0,
+  "postflight_status": "passed",
+  "resource_samples_path": "/home/jovyan/evopress/results/apples_to_apples/paper_matched/prepare_db/mistral7b_full_gptq_db_1gpu_diskspill_attempt3_20260819/resource_samples.jsonl",
+  "resource_summary": {
+    "attempt_id": "5dabb758983a4a66b38425feef762abb",
+    "baseline": {
+      "current_bytes": 3476619264,
+      "events": {
+        "high": 0,
+        "low": 0,
+        "max": 39592,
+        "oom": 0,
+        "oom_kill": 0
+      },
+      "limit_bytes": 17179869184,
+      "peak_bytes": null
+    },
+    "child_pid": 1046,
+    "event_deltas": {
+      "high": 0,
+      "low": 0,
+      "max": 483145,
+      "oom": 0,
+      "oom_kill": 0
+    },
+    "final": {
+      "current_bytes": 13224882176,
+      "events": {
+        "high": 0,
+        "low": 0,
+        "max": 522737,
+        "oom": 0,
+        "oom_kill": 0
+      },
+      "limit_bytes": 17179869184,
+      "peak_bytes": null
+    },
+    "final_process_tree": {
+      "pids": [],
+      "process_count": 0,
+      "root_pid": 1046,
+      "rss_bytes": 0,
+      "supported": true
+    },
+    "max_current_bytes_observed": 17179869184,
+    "max_peak_bytes_observed": null,
+    "max_process_count_observed": 2,
+    "max_process_tree_rss_bytes_observed": 6904041472,
+    "process_group_id": 1046,
+    "sampling_interval_seconds": 5
+  },
+  "runtime_seconds": 25928.567770898982,
+  "started_unix_seconds": 1787131582.279803
+}
