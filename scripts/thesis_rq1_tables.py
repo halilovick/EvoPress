@@ -30,6 +30,7 @@ REPLAY = REPO_ROOT / "results/exact_replays/replay_20261008/replay_results.csv"
 # Second replay batch: 12.5% depth-only masks (independent composition at s = 0.125).
 REPLAY_125 = REPO_ROOT / "results/exact_replays/replay_depth125/replay_results.csv"
 LMEVAL = REPO_ROOT / "results/exact_lmeval/fullspace_lmeval/jobs"
+LMEVAL_IND = REPO_ROOT / "results/exact_lmeval/independent_lmeval/jobs"
 LEDGER = REPO_ROOT / "thesis_results/fullspace_ledger.csv"
 SCREEN = REPO_ROOT / "results/sequential_search_runs.csv"
 SEEDS = (0, 1, 2)
@@ -270,7 +271,9 @@ LMEVAL_METHODS = (
     ("Uniform 3-bit (E1)", 0, ["own_uniform3"]),
     ("Quant.-only search (E2)", 0, [f"own_E2s{i}" for i in SEEDS]),
     ("Joint search (J12)", 0.125, [f"own_J12s{i}" for i in SEEDS]),
+    ("Independent composition", 0.125, [f"ind_DO12s{i}_QE2s{i}_shift" for i in SEEDS]),
     ("Joint search (E3)", 0.25, [f"own_E3s{i}" for i in SEEDS]),
+    ("Independent composition", 0.25, [f"ind_DO25s{i}_QE2s{i}_shift" for i in SEEDS]),
 )
 LMEVAL_TASKS = ("arc_easy", "piqa", "winogrande")
 
@@ -279,7 +282,7 @@ def lmeval_scores():
     import json
 
     scores = {}
-    for path in LMEVAL.glob("*/result.json"):
+    for path in [*LMEVAL.glob("*/result.json"), *LMEVAL_IND.glob("*/result.json")]:
         data = json.loads(path.read_text(encoding="utf-8"))
         if data.get("status") == "completed" and data["settings"]["limit"] is None:
             scores[path.parent.name] = data["scores"]
@@ -296,6 +299,8 @@ def table_lmeval(out):
     ]
     stderr = []
     for label, s, ids in LMEVAL_METHODS:
+        if not all(i in scores for i in ids):
+            continue
         cells = []
         for task in LMEVAL_TASKS:
             vals = [100 * scores[i][task]["score"] for i in ids]
