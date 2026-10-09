@@ -229,7 +229,7 @@ def table_baselines(out, ledger, replay):
         (0.25, "Last sublayers before the final layer", ["h25_late_layer_keep_last_nu"]),
     ]
     lines = [
-        r"\begin{tabular}{@{}>{\raggedright\arraybackslash}p{55mm}rrr@{}}", r"\toprule",
+        r"\begin{tabular}{@{}>{\raggedright\arraybackslash}p{60mm}rrr@{}}", r"\toprule",
         r"Configuration & WikiText-2 & C4 & Calib.\ KL \\",
     ]
     current = None
@@ -252,7 +252,7 @@ def table_baselines(out, ledger, replay):
         (0.25, "Block-influence mask", ["fp16_h25_bi_score"]),
         (0.25, "Last sublayers before the final layer", ["fp16_h25_late_layer_keep_last"]),
     ]
-    lines = [r"\begin{tabular}{@{}>{\raggedright\arraybackslash}p{55mm}rrr@{}}", r"\toprule",
+    lines = [r"\begin{tabular}{@{}>{\raggedright\arraybackslash}p{60mm}rrr@{}}", r"\toprule",
              r"Mask (16-bit, not at $T$) & WikiText-2 & C4 & Calib.\ KL \\"]
     current = None
     f16 = [g for g in f16 if have(replay, g[2])]
