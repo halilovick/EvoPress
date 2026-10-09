@@ -1,0 +1,44 @@
+{
+  "details": {
+    "removed_attn": [
+      8,
+      11,
+      12,
+      14,
+      16,
+      22,
+      27,
+      28
+    ],
+    "removed_mlp": [
+      8,
+      10,
+      11,
+      12,
+      13,
+      15,
+      22,
+      26
+    ],
+    "repair_changed_genes": 0,
+    "repair_levels_moved": 0
+  },
+  "job": {
+    "id": "fp16_DO25s2",
+    "mask": {
+      "source": "DO25s2"
+    },
+    "precision": "fp16",
+    "purpose": "16-bit depth-only evaluation of a mask",
+    "rq": "RQ1 reference",
+    "tier": "D"
+  },
+  "metrics": {
+    "c4": 12.84375,
+    "calibration_kl": 0.48974609375,
+    "wikitext2": 8.7734375
+  },
+  "seconds": 340.0599136352539,
+  "status": "completed",
+  "target_bits": 26982023168
+}

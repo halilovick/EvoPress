@@ -1,0 +1,44 @@
+{
+  "details": {
+    "removed_attn": [
+      12,
+      14,
+      16,
+      22,
+      24,
+      25,
+      27,
+      28
+    ],
+    "removed_mlp": [
+      8,
+      11,
+      12,
+      13,
+      15,
+      24,
+      26,
+      27
+    ],
+    "repair_changed_genes": 0,
+    "repair_levels_moved": 0
+  },
+  "job": {
+    "id": "fp16_E3s0",
+    "mask": {
+      "source": "E3s0"
+    },
+    "precision": "fp16",
+    "purpose": "16-bit depth-only evaluation of a mask",
+    "rq": "RQ1 reference",
+    "tier": "D"
+  },
+  "metrics": {
+    "c4": 12.15625,
+    "calibration_kl": 0.438720703125,
+    "wikitext2": 8.6015625
+  },
+  "seconds": 341.08660650253296,
+  "status": "completed",
+  "target_bits": 26982023168
+}

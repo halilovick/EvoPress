@@ -1,0 +1,39 @@
+{
+  "details": {
+    "removed_attn": [
+      22,
+      24,
+      25,
+      26
+    ],
+    "removed_mlp": [
+      24,
+      25,
+      26,
+      27
+    ],
+    "repair_changed_genes": 0,
+    "repair_levels_moved": 0
+  },
+  "job": {
+    "id": "fp16_h12_bi_score",
+    "mask": {
+      "k_attn": 4,
+      "k_mlp": 4,
+      "rule": "bi_score",
+      "seed": 0
+    },
+    "precision": "fp16",
+    "purpose": "16-bit heuristic depth-only evaluation",
+    "rq": "RQ1 reference",
+    "tier": "D"
+  },
+  "metrics": {
+    "c4": 10.2578125,
+    "calibration_kl": 0.27490234375,
+    "wikitext2": 7.17578125
+  },
+  "seconds": 375.92364287376404,
+  "status": "completed",
+  "target_bits": 26982023168
+}

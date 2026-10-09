@@ -1,0 +1,47 @@
+{
+  "details": {
+    "removed_attn": [
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30
+    ],
+    "removed_mlp": [
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30
+    ],
+    "repair_changed_genes": 0,
+    "repair_levels_moved": 0
+  },
+  "job": {
+    "id": "fp16_h25_late_layer_keep_last",
+    "mask": {
+      "k_attn": 8,
+      "k_mlp": 8,
+      "rule": "late_layer_keep_last",
+      "seed": 0
+    },
+    "precision": "fp16",
+    "purpose": "16-bit heuristic depth-only evaluation",
+    "rq": "RQ1 reference",
+    "tier": "D"
+  },
+  "metrics": {
+    "c4": 514.0,
+    "calibration_kl": 4.078125,
+    "wikitext2": 639.5
+  },
+  "seconds": 349.3069725036621,
+  "status": "completed",
+  "target_bits": 26982023168
+}

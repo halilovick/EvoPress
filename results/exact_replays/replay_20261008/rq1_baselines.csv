@@ -1,0 +1,52 @@
+id,c4_ppl,calibration_kl,precision,purpose,repair_changed_genes,wikitext2_ppl
+own_E3s0,12.640625,0.467041015625,quantized,re-evaluate completed final candidate,0,8.9453125
+own_E3s1,12.328125,0.4609375,quantized,re-evaluate completed final candidate,0,8.828125
+own_E3s2,12.5234375,0.4560546875,quantized,re-evaluate completed final candidate,0,9.109375
+own_J12s0,9.6015625,0.19921875,quantized,re-evaluate completed final candidate,0,6.4140625
+own_J12s1,9.734375,0.2154541015625,quantized,re-evaluate completed final candidate,0,6.89453125
+own_J12s2,9.6015625,0.2105712890625,quantized,re-evaluate completed final candidate,0,6.5546875
+own_DWs0,12.6640625,0.4716796875,quantized,re-evaluate completed final candidate,0,9.234375
+own_uniform3,8.5546875,0.09039306640625,quantized,re-evaluate E1 uniform 3-bit,0,5.5
+h25_late_layer_nu,342.5,3.9609375,quantized,heuristic mask + near-uniform precision,0,455.25
+h25_late_layer_keep_last_nu,514.0,4.0625,quantized,heuristic mask + near-uniform precision,0,591.5
+h25_random_s0_nu,37.59375,1.3623046875,quantized,heuristic mask + near-uniform precision,0,28.21875
+h25_random_s1_nu,49.40625,1.486328125,quantized,heuristic mask + near-uniform precision,0,36.59375
+h25_random_s2_nu,5396.0,6.3125,quantized,heuristic mask + near-uniform precision,0,40192.0
+h25_bi_score_nu,6876.0,5.359375,quantized,heuristic mask + near-uniform precision,0,5316.0
+h12_late_layer_nu,82.3125,2.369140625,quantized,heuristic mask + near-uniform precision,0,54.8125
+h12_late_layer_keep_last_nu,135.625,2.705078125,quantized,heuristic mask + near-uniform precision,0,116.5
+h12_random_s0_nu,16.6875,0.74951171875,quantized,heuristic mask + near-uniform precision,0,15.34375
+h12_random_s1_nu,31.109375,1.2607421875,quantized,heuristic mask + near-uniform precision,0,25.234375
+h12_random_s2_nu,30.984375,1.1474609375,quantized,heuristic mask + near-uniform precision,0,19.890625
+h12_bi_score_nu,11.2890625,0.34619140625,quantized,heuristic mask + near-uniform precision,0,8.1015625
+ind_DO25s0_QE2s0_shift,14.2734375,0.552734375,quantized,"independent composition: depth-only mask, quantization-only profile shifted to budget",1,9.6015625
+ind_DO25s0_nu,14.6953125,0.5771484375,quantized,depth-only mask + near-uniform precision,0,10.296875
+ind_DO25s1_QE2s1_shift,15.28125,0.6416015625,quantized,"independent composition: depth-only mask, quantization-only profile shifted to budget",1,10.421875
+ind_DO25s1_nu,15.4921875,0.65380859375,quantized,depth-only mask + near-uniform precision,0,10.6015625
+ind_DO25s2_QE2s2_shift,13.25,0.51904296875,quantized,"independent composition: depth-only mask, quantization-only profile shifted to budget",1,9.0859375
+ind_DO25s2_nu,13.328125,0.52783203125,quantized,depth-only mask + near-uniform precision,0,9.359375
+att_E3s0_nu,12.7421875,0.4755859375,quantized,joint mask + near-uniform precision,0,9.125
+att_E3s0_QE2s0_shift,12.71875,0.47265625,quantized,joint mask + quantization-only profile shifted,1,9.0546875
+att_E3s1_nu,12.3984375,0.469482421875,quantized,joint mask + near-uniform precision,0,8.9140625
+att_E3s1_QE2s1_shift,12.28125,0.46435546875,quantized,joint mask + quantization-only profile shifted,1,8.828125
+att_E3s2_nu,12.59375,0.462158203125,quantized,joint mask + near-uniform precision,0,9.1953125
+att_E3s2_QE2s2_shift,12.59375,0.455078125,quantized,joint mask + quantization-only profile shifted,1,9.0546875
+att_J12s0_nu,9.9453125,0.22705078125,quantized,joint mask + near-uniform precision,0,6.80078125
+att_J12s0_QE2s0_shift,9.6953125,0.2098388671875,quantized,joint mask + quantization-only profile shifted,0,6.515625
+att_J12s1_nu,10.21875,0.2489013671875,quantized,joint mask + near-uniform precision,0,6.99609375
+att_J12s1_QE2s1_shift,9.9453125,0.231201171875,quantized,joint mask + quantization-only profile shifted,0,6.6953125
+att_J12s2_nu,10.0234375,0.2392578125,quantized,joint mask + near-uniform precision,0,7.03515625
+att_J12s2_QE2s2_shift,9.7109375,0.2200927734375,quantized,joint mask + quantization-only profile shifted,0,6.68359375
+fp16_E3s0,12.15625,0.438720703125,fp16,16-bit depth-only evaluation of a mask,0,8.6015625
+fp16_E3s1,11.9921875,0.435791015625,fp16,16-bit depth-only evaluation of a mask,0,8.484375
+fp16_E3s2,12.109375,0.4267578125,fp16,16-bit depth-only evaluation of a mask,0,8.7578125
+fp16_J12s0,9.015625,0.1531982421875,fp16,16-bit depth-only evaluation of a mask,0,6.0234375
+fp16_J12s1,9.15625,0.16748046875,fp16,16-bit depth-only evaluation of a mask,0,6.109375
+fp16_J12s2,9.0703125,0.1650390625,fp16,16-bit depth-only evaluation of a mask,0,6.171875
+fp16_DO25s0,13.7265625,0.5205078125,fp16,16-bit depth-only evaluation of a mask,0,9.15625
+fp16_DO25s1,14.609375,0.60986328125,fp16,16-bit depth-only evaluation of a mask,0,9.9609375
+fp16_DO25s2,12.84375,0.48974609375,fp16,16-bit depth-only evaluation of a mask,0,8.7734375
+fp16_h25_late_layer_keep_last,514.0,4.078125,fp16,16-bit heuristic depth-only evaluation,0,639.5
+fp16_h25_bi_score,9040.0,5.6640625,fp16,16-bit heuristic depth-only evaluation,0,6460.0
+fp16_h12_late_layer_keep_last,120.1875,2.572265625,fp16,16-bit heuristic depth-only evaluation,0,93.25
+fp16_h12_bi_score,10.2578125,0.27490234375,fp16,16-bit heuristic depth-only evaluation,0,7.17578125
