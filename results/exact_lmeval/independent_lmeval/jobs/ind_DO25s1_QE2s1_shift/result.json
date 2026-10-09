@@ -1,0 +1,120 @@
+{
+  "details": {
+    "bits_sha256": "f806c315c617ac030e5d88776af67c02d863f35a3c8b68fab9fd88550934a002",
+    "cost_bits": 26982023168,
+    "pre_repair_deficits": [
+      0,
+      1,
+      0
+    ],
+    "removed_attn": [
+      10,
+      14,
+      16,
+      18,
+      22,
+      24,
+      27,
+      28
+    ],
+    "removed_mlp": [
+      7,
+      10,
+      12,
+      13,
+      15,
+      17,
+      23,
+      29
+    ],
+    "repair_changed_active_only": true,
+    "repair_changed_genes": 1,
+    "repair_changes": {
+      "model.layers.0.self_attn.v_proj": [
+        4,
+        5
+      ]
+    },
+    "repair_levels_moved": 1
+  },
+  "job": {
+    "bits": {
+      "fill": "donor",
+      "source": "E2s1",
+      "transform": "shift"
+    },
+    "id": "ind_DO25s1_QE2s1_shift",
+    "mask": {
+      "source": "DO25s1"
+    },
+    "precision": "quantized",
+    "purpose": "independent composition: depth-only mask, quantization-only profile shifted to budget",
+    "removed": [
+      8,
+      8
+    ],
+    "repair": {
+      "scope": "all",
+      "seed": 0
+    },
+    "rq": "RQ1",
+    "static_deficits": [
+      1,
+      0,
+      0
+    ],
+    "tier": "L"
+  },
+  "scores": {
+    "arc_easy": {
+      "acc": 0.6144781144781145,
+      "acc_norm": 0.5740740740740741,
+      "acc_norm_stderr": 0.010146568651002257,
+      "acc_stderr": 0.009987250004629026,
+      "metric": "acc_norm",
+      "n_samples": 2376,
+      "score": 0.5740740740740741,
+      "stderr": 0.010146568651002257
+    },
+    "piqa": {
+      "acc": 0.7252448313384113,
+      "acc_norm": 0.733949945593036,
+      "acc_norm_stderr": 0.01031003926335283,
+      "acc_stderr": 0.010415033676676034,
+      "metric": "acc_norm",
+      "n_samples": 1838,
+      "score": 0.733949945593036,
+      "stderr": 0.01031003926335283
+    },
+    "winogrande": {
+      "acc": 0.606156274664562,
+      "acc_norm": null,
+      "acc_norm_stderr": null,
+      "acc_stderr": 0.013732114472668758,
+      "metric": "acc",
+      "n_samples": 1267,
+      "score": 0.606156274664562,
+      "stderr": 0.013732114472668758
+    }
+  },
+  "seconds": 241.8038489818573,
+  "settings": {
+    "attn_implementation": "sdpa",
+    "base_model": "mistralai/Mistral-7B-v0.3",
+    "batch_size": 4,
+    "dtype": "float16",
+    "limit": null,
+    "lm_eval_version": "0.4.13",
+    "num_fewshot": 0,
+    "quant_db": "/home/jovyan/evopress_quant_stage1_1gpu_diskspill_attempt3_20260819/Mistral-7B-v0.3/3bit",
+    "target_bitwidth": 3,
+    "tasks": [
+      "arc_easy",
+      "piqa",
+      "winogrande"
+    ],
+    "tokenizer": "mistralai/Mistral-7B-v0.3 (fast)"
+  },
+  "status": "completed",
+  "target_bits": 26982023168
+}
