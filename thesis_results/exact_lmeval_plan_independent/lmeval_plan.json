@@ -1,0 +1,194 @@
+{
+  "version": 1,
+  "purpose": "zero-shot LM-eval of the independent compositions (replay candidates)",
+  "reference_bitwidth": 3,
+  "levels": [
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "replay_plan": "thesis_results/exact_replay_plan_125/replay_plan.json",
+  "sources": {
+    "DO12s0": "results/runs/thesis_medium_depth_mistral_s0.125_g20_o16_seed0/final_candidate.json",
+    "DO12s1": "results/runs/thesis_medium_depth_mistral_s0.125_g20_o16_seed1/final_candidate.json",
+    "DO12s2": "results/runs/thesis_medium_depth_mistral_s0.125_g20_o16_seed2/final_candidate.json",
+    "DO25s0": "results/runs/thesis_medium_depth_mistral_s0.25_g20_o16_seed0/final_candidate.json",
+    "DO25s1": "results/runs/thesis_medium_depth_mistral_s0.25_g20_o16_seed1/final_candidate.json",
+    "DO25s2": "results/runs/thesis_medium_depth_mistral_s0.25_g20_o16_seed2/final_candidate.json",
+    "E2s0": "thesis_results/datalab_raw/paper_matched/quant_only/quant_only_seed0_attempt12_resume_20260826/final_candidate.json",
+    "E2s1": "thesis_results/datalab_raw/paper_matched/quant_only/quant_only_seed1_attempt4_resume_20260828/final_candidate.json",
+    "E2s2": "thesis_results/datalab_raw/paper_matched/quant_only/quant_only_seed2_attempt2_resume_20260830/final_candidate.json"
+  },
+  "jobs": [
+    {
+      "id": "ind_DO12s0_QE2s0_shift",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "independent composition: depth-only mask, quantization-only profile shifted to budget",
+      "mask": {
+        "source": "DO12s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "E2s0",
+        "fill": "donor",
+        "transform": "shift"
+      },
+      "repair": {
+        "scope": "all",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        4,
+        4
+      ]
+    },
+    {
+      "id": "ind_DO12s1_QE2s1_shift",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "independent composition: depth-only mask, quantization-only profile shifted to budget",
+      "mask": {
+        "source": "DO12s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "E2s1",
+        "fill": "donor",
+        "transform": "shift"
+      },
+      "repair": {
+        "scope": "all",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        4,
+        4
+      ]
+    },
+    {
+      "id": "ind_DO12s2_QE2s2_shift",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "independent composition: depth-only mask, quantization-only profile shifted to budget",
+      "mask": {
+        "source": "DO12s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "E2s2",
+        "fill": "donor",
+        "transform": "shift"
+      },
+      "repair": {
+        "scope": "all",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        4,
+        4
+      ]
+    },
+    {
+      "id": "ind_DO25s0_QE2s0_shift",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "independent composition: depth-only mask, quantization-only profile shifted to budget",
+      "mask": {
+        "source": "DO25s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "E2s0",
+        "fill": "donor",
+        "transform": "shift"
+      },
+      "repair": {
+        "scope": "all",
+        "seed": 0
+      },
+      "static_deficits": [
+        1,
+        0,
+        0
+      ],
+      "removed": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "ind_DO25s1_QE2s1_shift",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "independent composition: depth-only mask, quantization-only profile shifted to budget",
+      "mask": {
+        "source": "DO25s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "E2s1",
+        "fill": "donor",
+        "transform": "shift"
+      },
+      "repair": {
+        "scope": "all",
+        "seed": 0
+      },
+      "static_deficits": [
+        1,
+        0,
+        0
+      ],
+      "removed": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "ind_DO25s2_QE2s2_shift",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "independent composition: depth-only mask, quantization-only profile shifted to budget",
+      "mask": {
+        "source": "DO25s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "E2s2",
+        "fill": "donor",
+        "transform": "shift"
+      },
+      "repair": {
+        "scope": "all",
+        "seed": 0
+      },
+      "static_deficits": [
+        1,
+        0,
+        0
+      ],
+      "removed": [
+        8,
+        8
+      ]
+    }
+  ]
+}

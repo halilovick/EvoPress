@@ -16,6 +16,11 @@ The settings are written to ``settings.json``; a rerun with different settings
 into the same output directory is refused, so all models of one directory are
 evaluated identically.
 
+Replay candidates that need a budget repair (the independent compositions) are
+evaluated only with ``--allow_repair``; the repair is the deterministic
+production repair used by the replays, and the bit-width hashes are compared
+with the replay results by ``scripts/summarize_exact_lmeval.py --set independent``.
+
 Order within one process: the dense job first (before any quantized weights are
 loaded), then the quantized jobs. Completed jobs are skipped on a rerun unless
 ``--overwrite`` is given. ``--limit`` is for smoke tests only and is only
@@ -74,6 +79,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--dry_run", action="store_true", help="Build and validate candidates, no evaluation.")
+    parser.add_argument(
+        "--allow_repair",
+        action="store_true",
+        help="Allow jobs with a repair scope (replay candidates, e.g. the independent compositions). The "
+        "repair is the deterministic production repair of the replays; scripts/summarize_exact_lmeval.py "
+        "checks that the resulting bit-widths equal those of the replay batch.",
+    )
     args = parser.parse_args(argv)
     args.use_fast_tokenizer = True  # read by prepare_model
     return args
@@ -172,8 +184,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         start = time.time()
         result: dict[str, Any] = {"job": job, "target_bits": target, "settings": settings}
         try:
-            if (job.get("repair") or {}).get("scope", "none") != "none":
-                raise ValueError("LM-eval jobs must not be repaired.")
+            if (job.get("repair") or {}).get("scope", "none") != "none" and not args.allow_repair:
+                raise ValueError("Job has a repair scope; pass --allow_repair for replay candidates.")
             candidate, details = build_candidate(job, args, ctx)
             details.pop("bits", None)
             result["details"] = details

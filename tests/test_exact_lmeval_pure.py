@@ -153,3 +153,81 @@ class SummaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IndependentSetTests(unittest.TestCase):
+    """The six independent compositions (replay candidates)."""
+
+    def setUp(self):
+        self.plan = plan_exact_lmeval.build_independent_plan(REPO_ROOT)
+
+    def test_jobs_are_copies_of_the_replay_jobs(self):
+        replay_125 = json.loads((REPO_ROOT / "thesis_results/exact_replay_plan_125/replay_plan.json").read_text())
+        replay_97 = json.loads((REPO_ROOT / "thesis_results/exact_replay_plan/replay_plan.json").read_text())
+        jobs_125 = {j["id"]: j for j in replay_125["jobs"]}
+        jobs_97 = {j["id"]: j for j in replay_97["jobs"]}
+        self.assertEqual([j["id"] for j in self.plan["jobs"]], plan_exact_lmeval.INDEPENDENT_JOBS)
+        for job in self.plan["jobs"]:
+            for key in ("mask", "bits", "repair", "precision"):
+                self.assertEqual(job[key], jobs_125[job["id"]][key])
+                if job["id"] in jobs_97:  # the 25% compositions of the first batch
+                    self.assertEqual(job[key], jobs_97[job["id"]][key])
+            self.assertEqual(job["removed"], [4, 4] if "DO12" in job["id"] else [8, 8])
+        for label, path in self.plan["sources"].items():
+            self.assertEqual(path, replay_125["sources"][label])
+
+    def test_replay_hashes_exist_for_all_six(self):
+        hashes = {}
+        for d in summarize_exact_lmeval.DEFAULT_REPLAY_DIRS:
+            hashes.update(summarize_exact_lmeval.replay_hashes(REPO_ROOT / d, "ind_"))
+        for job in plan_exact_lmeval.INDEPENDENT_JOBS:
+            self.assertIn(job, hashes)
+
+    def _write(self, out, status, digest_of, settings, raw=None):
+        for job in self.plan["jobs"]:
+            removed = job["removed"]
+            result = {"job": job, "status": status, "settings": settings,
+                      "details": {"removed_attn": list(range(removed[0])), "removed_mlp": list(range(removed[1])),
+                                  "cost_bits": 26982023168, "bits_sha256": digest_of(job["id"])}}
+            if raw is not None:
+                result["scores"] = task_scores(raw, TASKS)
+            path = out / "jobs" / job["id"] / "result.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(result))
+
+    def test_dry_run_check_requires_replay_hashes(self):
+        hashes = {}
+        for d in summarize_exact_lmeval.DEFAULT_REPLAY_DIRS:
+            hashes.update(summarize_exact_lmeval.replay_hashes(REPO_ROOT / d, "ind_"))
+        spec = summarize_exact_lmeval.SETS["independent"]
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            self._write(out, "validated", hashes.get, settings_of(fake_args(), "0.4.13"))
+            checks = summarize_exact_lmeval.verify_candidates(
+                summarize_exact_lmeval.load_results(out), hashes, spec["methods"], spec["removed"])
+            self.assertTrue(all(ok for _, ok, _ in checks), checks)
+            self._write(out, "validated", lambda j: "other", settings_of(fake_args(), "0.4.13"))
+            checks = summarize_exact_lmeval.verify_candidates(
+                summarize_exact_lmeval.load_results(out), hashes, spec["methods"], spec["removed"])
+            self.assertFalse(all(ok for _, ok, _ in checks))
+
+    def test_full_check_compares_settings_with_the_11_model_run(self):
+        raw = json.loads(SCREENING_DENSE.read_text())
+        hashes = {}
+        for d in summarize_exact_lmeval.DEFAULT_REPLAY_DIRS:
+            hashes.update(summarize_exact_lmeval.replay_hashes(REPO_ROOT / d, "ind_"))
+        spec = summarize_exact_lmeval.SETS["independent"]
+        reference = json.loads((REPO_ROOT / summarize_exact_lmeval.DEFAULT_REFERENCE_SETTINGS).read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            same = dict(reference, quant_db="/elsewhere")
+            self._write(out, "completed", hashes.get, same, raw)
+            checks = summarize_exact_lmeval.verify(
+                summarize_exact_lmeval.load_results(out), hashes, None, methods=spec["methods"],
+                want=spec["removed"], reference_settings=reference, require_replay=True)
+            self.assertTrue(all(ok for _, ok, _ in checks), checks)
+            self._write(out, "completed", hashes.get, dict(reference, batch_size=8), raw)
+            checks = dict((n, ok) for n, ok, _ in summarize_exact_lmeval.verify(
+                summarize_exact_lmeval.load_results(out), hashes, None, methods=spec["methods"],
+                want=spec["removed"], reference_settings=reference, require_replay=True))
+            self.assertFalse(checks["settings identical to the 11-model LM-eval"])

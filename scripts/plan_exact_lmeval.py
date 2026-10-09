@@ -83,23 +83,69 @@ def build_plan(root: Path, labels: list[str]) -> dict[str, Any]:
     }
 
 
+REPLAY_PLAN_125 = "thesis_results/exact_replay_plan_125/replay_plan.json"
+INDEPENDENT_JOBS = [f"ind_DO12s{i}_QE2s{i}_shift" for i in range(3)] + [f"ind_DO25s{i}_QE2s{i}_shift" for i in range(3)]
+
+
+def build_independent_plan(root: Path) -> dict[str, Any]:
+    """The six independent compositions, copied verbatim from the replay plan.
+
+    The jobs keep their replay ids, masks, bit-width rules and repair settings, so
+    the evaluated candidates are those of the replay batches; the runner records
+    their bit-width hashes, which are compared with the replay results.
+    """
+    replay_plan = json.loads((root / REPLAY_PLAN_125).read_text(encoding="utf-8"))
+    by_id = {entry["id"]: entry for entry in replay_plan["jobs"]}
+    jobs = []
+    for job_id in INDEPENDENT_JOBS:
+        entry = json.loads(json.dumps(by_id[job_id]))
+        entry["tier"] = "L"
+        jobs.append(entry)
+    labels = sorted({entry["mask"]["source"] for entry in jobs} | {entry["bits"]["source"] for entry in jobs})
+    groups = size_groups(mistral_module_sizes())
+    sources = {}
+    for label in labels:
+        cand = load_final_candidate(root / replay_plan["sources"][label])
+        sources[label] = cand
+    for entry in jobs:
+        drop = sources[entry["mask"]["source"]]["drop"]
+        entry["removed"] = [sum(drop["attn"]), sum(drop["mlp"])]
+        bits, _ = build_replay_bits(entry, drop, sources, groups)
+        entry["static_deficits"] = level_deficits(groups, bits, drop)
+    return {
+        "version": 1,
+        "purpose": "zero-shot LM-eval of the independent compositions (replay candidates)",
+        "reference_bitwidth": 3,
+        "levels": [2, 3, 4, 5, 6],
+        "replay_plan": REPLAY_PLAN_125,
+        "sources": {label: replay_plan["sources"][label] for label in labels},
+        "jobs": jobs,
+    }
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo_root", default=str(REPO_ROOT))
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--include_variants", action="store_true",
                         help="Also add the RQ2 variants (IA, DW, P4, LX); not part of the default 11 models.")
+    parser.add_argument("--set", default="fullspace", choices=["fullspace", "independent"],
+                        help="independent: the six independent compositions of the replay batches.")
     args = parser.parse_args(argv)
-    labels = list(DEFAULT_SOURCES) + (list(EXTRA_SOURCES) if args.include_variants else [])
-    plan = build_plan(Path(args.repo_root), labels)
+    if args.set == "independent":
+        plan = build_independent_plan(Path(args.repo_root))
+    else:
+        labels = list(DEFAULT_SOURCES) + (list(EXTRA_SOURCES) if args.include_variants else [])
+        plan = build_plan(Path(args.repo_root), labels)
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / "lmeval_plan.json").write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
-    lines = ["# Zero-shot LM-eval plan (full-space final models)", "", f"Jobs: {len(plan['jobs'])}", "",
-             "| Job | Precision | Removed (attn, MLP) | Source |", "| --- | --- | --- | --- |"]
+    lines = [f"# Zero-shot LM-eval plan ({plan['purpose']})", "", f"Jobs: {len(plan['jobs'])}", "",
+             "| Job | Precision | Removed (attn, MLP) | Repair | Mask source |", "| --- | --- | --- | --- | --- |"]
     for entry in plan["jobs"]:
         source = plan["sources"].get(entry["mask"].get("source", ""), "-")
-        lines.append(f"| `{entry['id']}` | {entry['precision']} | {entry.get('removed', [0, 0])} | {source} |")
+        repair = (entry.get("repair") or {}).get("scope", "-")
+        lines.append(f"| `{entry['id']}` | {entry['precision']} | {entry.get('removed', [0, 0])} | {repair} | {source} |")
     (out / "lmeval_plan.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"jobs={len(plan['jobs'])} written to {out / 'lmeval_plan.json'}")
 

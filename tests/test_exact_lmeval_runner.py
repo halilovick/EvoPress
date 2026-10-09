@@ -53,6 +53,10 @@ class LmEvalApiTests(unittest.TestCase):
         self.assertEqual((args.num_fewshot, args.batch_size, args.limit, args.attn_implementation),
                          (0, 4, None, "sdpa"))
         self.assertEqual(args.tasks, "arc_easy,piqa,winogrande")
+        self.assertFalse(args.allow_repair)
+        args = evo_exact_lmeval.parse_args(["--plan", "p.json", "--quant_db", "/db", "--output_dir", "o",
+                                            "--allow_repair"])
+        self.assertTrue(args.allow_repair)
 
 
 if __name__ == "__main__":
