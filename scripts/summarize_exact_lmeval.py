@@ -165,7 +165,7 @@ def main(argv=None) -> int:
     (out / "lmeval_by_model.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     print("\n".join(lines))
     print()
-    print("\n".join(md[:5 + len(per_method)]))
+    print("\n".join(md[:6 + len(per_method)]))
     return 0 if all(ok for _, ok, _ in checks) else 1
 
 

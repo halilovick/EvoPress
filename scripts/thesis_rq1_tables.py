@@ -27,6 +27,9 @@ from scripts.plan_exact_replays import FULLSPACE_CANDIDATES  # noqa: E402
 from src.exact_replay import layer_index, load_final_candidate, module_is_active  # noqa: E402
 
 REPLAY = REPO_ROOT / "results/exact_replays/replay_20261008/replay_results.csv"
+# Second replay batch: 12.5% depth-only masks (independent composition at s = 0.125).
+REPLAY_125 = REPO_ROOT / "results/exact_replays/replay_depth125/replay_results.csv"
+LMEVAL = REPO_ROOT / "results/exact_lmeval/fullspace_lmeval/jobs"
 LEDGER = REPO_ROOT / "thesis_results/fullspace_ledger.csv"
 SCREEN = REPO_ROOT / "results/sequential_search_runs.csv"
 SEEDS = (0, 1, 2)
@@ -52,7 +55,16 @@ def thousands(n):
 def load_inputs():
     ledger = list(csv.DictReader(open(LEDGER, encoding="utf-8")))
     replay = {r["id"]: r for r in csv.DictReader(open(REPLAY, encoding="utf-8"))}
+    if REPLAY_125.is_file():
+        for r in csv.DictReader(open(REPLAY_125, encoding="utf-8")):
+            if r["id"] in replay:
+                raise ValueError(f"Replay job {r['id']} appears in both batches.")
+            replay[r["id"]] = r
     return ledger, replay
+
+
+def have(replay, ids):
+    return all(i in replay and replay[i]["status"] == "completed" for i in ids)
 
 
 def ledger_values(ledger, condition, key):
@@ -200,6 +212,8 @@ def table_baselines(out, ledger, replay):
         (0.125, "Joint search (J12)", [f"own_J12s{i}" for i in SEEDS]),
         (0.125, "Joint masks, E2 profile shifted", [f"att_J12s{i}_QE2s{i}_shift" for i in SEEDS]),
         (0.125, "Joint masks, near-uniform", [f"att_J12s{i}_nu" for i in SEEDS]),
+        (0.125, "Depth-only masks, E2 profile shifted", [f"ind_DO12s{i}_QE2s{i}_shift" for i in SEEDS]),
+        (0.125, "Depth-only masks, near-uniform", [f"ind_DO12s{i}_nu" for i in SEEDS]),
         (0.125, "Block-influence mask", ["h12_bi_score_nu"]),
         (0.125, "Random masks (3)", [f"h12_random_s{i}_nu" for i in SEEDS]),
         (0.125, "Last sublayers", ["h12_late_layer_nu"]),
@@ -219,6 +233,7 @@ def table_baselines(out, ledger, replay):
         r"Configuration & WikiText-2 & C4 & Calib.\ KL \\",
     ]
     current = None
+    groups = [g for g in groups if have(replay, g[2])]
     for s, label, ids in groups:
         if s != current:
             lines += [r"\midrule", f"\\multicolumn{{4}}{{@{{}}l}}{{\\emph{{$s = {s:g}$}}}} \\\\"]
@@ -229,6 +244,7 @@ def table_baselines(out, ledger, replay):
 
     f16 = [
         (0.125, "Joint masks (J12)", [f"fp16_J12s{i}" for i in SEEDS]),
+        (0.125, "Depth-only masks", [f"fp16_DO12s{i}" for i in SEEDS]),
         (0.125, "Block-influence mask", ["fp16_h12_bi_score"]),
         (0.125, "Last sublayers before the final layer", ["fp16_h12_late_layer_keep_last"]),
         (0.25, "Joint masks (E3)", [f"fp16_E3s{i}" for i in SEEDS]),
@@ -239,6 +255,7 @@ def table_baselines(out, ledger, replay):
     lines = [r"\begin{tabular}{@{}>{\raggedright\arraybackslash}p{55mm}rrr@{}}", r"\toprule",
              r"Mask (16-bit, not at $T$) & WikiText-2 & C4 & Calib.\ KL \\"]
     current = None
+    f16 = [g for g in f16 if have(replay, g[2])]
     for s, label, ids in f16:
         if s != current:
             lines += [r"\midrule", f"\\multicolumn{{4}}{{@{{}}l}}{{\\emph{{$s = {s:g}$}}}} \\\\"]
@@ -246,6 +263,50 @@ def table_baselines(out, ledger, replay):
         lines += baseline_rows(label, ids, r)
     lines += [r"\bottomrule", r"\end{tabular}"]
     write(out, "tab_fp16.tex", "\n".join(lines) + "\n")
+
+
+LMEVAL_METHODS = (
+    ("Dense, 16-bit (E0)", 0, ["dense"]),
+    ("Uniform 3-bit (E1)", 0, ["own_uniform3"]),
+    ("Quant.-only search (E2)", 0, [f"own_E2s{i}" for i in SEEDS]),
+    ("Joint search (J12)", 0.125, [f"own_J12s{i}" for i in SEEDS]),
+    ("Joint search (E3)", 0.25, [f"own_E3s{i}" for i in SEEDS]),
+)
+LMEVAL_TASKS = ("arc_easy", "piqa", "winogrande")
+
+
+def lmeval_scores():
+    import json
+
+    scores = {}
+    for path in LMEVAL.glob("*/result.json"):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("status") == "completed" and data["settings"]["limit"] is None:
+            scores[path.parent.name] = data["scores"]
+    return scores
+
+
+def table_lmeval(out):
+    scores = lmeval_scores()
+    if not scores:
+        return
+    lines = [
+        r"\begin{tabular}{@{}lrrrrr@{}}", r"\toprule",
+        r"Model & $s$ & ARC-Easy & PIQA & WinoGrande & Mean \\", r"\midrule",
+    ]
+    stderr = []
+    for label, s, ids in LMEVAL_METHODS:
+        cells = []
+        for task in LMEVAL_TASKS:
+            vals = [100 * scores[i][task]["score"] for i in ids]
+            stderr += [100 * scores[i][task]["stderr"] for i in ids]
+            cells.append(ms(vals, 1))
+        means = [100 * st.mean(scores[i][t]["score"] for t in LMEVAL_TASKS) for i in ids]
+        cells.append(ms(means, 1))
+        lines.append(f"{label} & {s:g} & " + " & ".join(cells) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    write(out, "tab_lmeval.tex", "\n".join(lines) + "\n")
+    write(out, "lmeval_stderr_range.tex", f"{min(stderr):.1f}--{max(stderr):.1f}\n")
 
 
 def table_allocation_per_seed(out, replay):
@@ -363,6 +424,7 @@ def main(argv=None):
     table_bits_by_type(out)
     figure_removals(out)
     table_screening(out)
+    table_lmeval(out)
     print(f"wrote {sorted(p.name for p in out.iterdir())}")
 
 
