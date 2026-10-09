@@ -4,7 +4,7 @@ Prepared 2026-10-08. Every item names its data source. Status:
 
 * **available**: the data exists in the evopress repository and only needs scripting;
 * **screening**: available, but from the screening protocol (active-average budget), so it goes in its own table;
-* **conditional**: needs the planned exact-budget replays (`thesis_results/exact_replay_plan/`); include only if they are run.
+* **replay**: from the exact-budget replays, completed 2026-10-09 (`results/exact_replays/replay_20261008/analysis/`).
 
 Conventions: mean ± population SD over seeds plus individual seed values; the
 screening summaries in `results/*.csv` currently use the sample SD and must be
@@ -30,8 +30,8 @@ corresponding published values are checked against the paper first.
 | F6.2 | Figure | Where the joint search removes and spends: heatmap over 32 layers × {attention, MLP} counting removals across seeds (E3, J12), and mean bit-width per projection type and layer for E2, J12, E3 | final candidates | available |
 | T6.3 | Table | Agreement between seeds: mask Jaccard overlap and bit-width Hamming distance on shared active projections | `exact_replay_plan/pair_analysis.csv` | available |
 | T6.4 | Table | Screening RQ1: quantization-only, depth-only + uniform, independent composition, sequential (frozen/warm), joint G20/G50 (W2 PPL, effort) | `results/sequential_search_summary.csv`, `mistral_medium_*.csv` | screening |
-| T6.5 | Table | Exact-budget heuristic baselines (late, late-keep-last, random ×3, block influence) and independent compositions (depth-only masks × E2), at 25% and 12.5% | replay tier C | conditional |
-| T6.6 | Table | 16-bit depth-only references of joint, depth-only and heuristic masks (replaces the supplied 8.66 / 12.04) | replay tier D | conditional |
+| T6.5 | Table | Exact-budget heuristic baselines (late, late-keep-last, random ×3, block influence) and independent compositions (depth-only masks × E2), at 25% and 12.5% | replay tier C | replay |
+| T6.6 | Table | 16-bit depth-only references of joint, depth-only and heuristic masks (replaces the supplied 8.66 / 12.04) | replay tier D | replay |
 | T6.7 | Table (or appendix) | Zero-shot ARC-Easy / PIQA / WinoGrande and multi-dataset PPL of screening models | `results/mistral_*lmeval*`, `*generalization*` | screening |
 
 ## 6.3 RQ2: search design
@@ -52,8 +52,8 @@ corresponding published values are checked against the paper first.
 | T6.12 | Table | Screening replay matrices (q_proj and attention scope): mask source × bit-width source, W2 PPL per seed, number of repaired genes | `results/attribution/*` | screening |
 | T6.13 | Table | Screening contrasts I with δ_A, δ_B on log-PPL, computed from T6.12, grouped by repair count (0 vs > 0) | derived from T6.12 | screening |
 | F6.5 | Figure | Descriptive coupling in final models: bit-widths of projections in layers adjacent to removed sublayers versus other layers; precision of the remaining sublayer in layers with one removed sublayer | final candidates | available |
-| T6.14 | Table | Full-space contrasts: shared-gene exchange for the repair-free pairs (E3 s1 × DW, J12 s0 × s1) and repaired seed pairs, with δ terms, repaired genes and the range over repair seeds; plain crossing for comparison | replay tiers 0, A, B | conditional |
-| T6.15 | Table | Allocation attribution: joint masks with their own bit-widths vs near-uniform vs E2 shifted to the budget | replay tier C (`att_*`) | conditional |
+| T6.14 | Table | Full-space contrasts: shared-gene exchange for the repair-free pairs (E3 s1 × DW, J12 s0 × s1) and repaired seed pairs, with δ terms, repaired genes and the range over repair seeds; plain crossing for comparison | replay tiers 0, A, B | replay |
+| T6.15 | Table | Allocation attribution: joint masks with their own bit-widths vs near-uniform vs E2 shifted to the budget | replay tier C (`att_*`) | replay |
 
 ## 6.5 Summary of findings
 
@@ -66,4 +66,4 @@ vs full-space). This summary feeds the Discussion chapter.
 1. Write scripts for T6.1, T6.2, T6.8, T6.11, F6.1, F6.3 from the ledger and logs (no GPU).
 2. F6.2, T6.3, F6.5, T6.9 from final candidates and run summaries (no GPU).
 3. Recompute screening tables T6.4, T6.10, T6.12, T6.13 with the population SD.
-4. If the replay batch runs: T6.5, T6.6, T6.14, T6.15.
+4. Replay tables T6.5, T6.6, T6.14, T6.15 from `scripts/analyze_exact_replays.py` (data available).

@@ -1,8 +1,12 @@
-# Exact-budget replays: RQ1 baselines and RQ3 interaction (planned, not run)
+# Exact-budget replays: RQ1 baselines and RQ3 interaction
 
-Status on 2026-10-08: **designed and implemented, not executed.** No numbers in
-this directory are experimental results. `pair_analysis.*` contains only exact
+Status: **run 2026-10-08/09, 97/97 completed.** Results:
+`results/exact_replays/replay_20261008/` (analysis and findings in its `analysis/`
+folder). This directory holds the plan; `pair_analysis.*` contains only exact
 bit-width arithmetic on completed final candidates (no model evaluation).
+Measured cost: mean 359 s per evaluation, about 10 hours in total (the estimate below
+was too low). The replays ran in a rebuilt environment with the September package
+versions and reproduced all 8 re-evaluated finals exactly.
 
 ## Why
 
@@ -88,7 +92,6 @@ roughly 5–8 GPU-hours for all 97 jobs.
 
 * `tests/test_exact_replay_pure.py` (18 tests, standard library only): **run and
   passing** in the authoring environment.
-* `tests/test_exact_replay_runner.py` and the new `test_frozen_*` tests in
-  `tests/test_exact_budget_depth_warm.py` need PyTorch, which could not be
-  installed in the authoring environment: **not yet run**. Run them on DataLab
-  before launching.
+* `tests/test_exact_replay_runner.py`, `tests/test_exact_budget_depth_warm.py`
+  (incl. the `test_frozen_*` tests) and `tests/test_compression_budget.py`: run on
+  DataLab on 2026-10-08 in the rebuilt environment, 55 passed.

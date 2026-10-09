@@ -22,7 +22,7 @@ internal RQ1–RQ8 numbering is not used here.
 | **S-attn: screening, attention** | as S | 128 attention projections (q, k, v, o); levels 2–4 | active-average | as S | as S; standard joint G50 used survivors 4/2/1, IA G50 8/2/1 | as S |
 | **Tiny: TinyLlama screens** | TinyLlama-1.1B-Chat-v1.0 | q_proj; levels 2–4 | active-average | WikiText-2, 4,096 tokens, length 1,024 | λ = 8; 16 initial candidates; survivors 2/1; tokens 512/2,048; s = 12.5% | WikiText-2 perplexity (4,096 tokens) |
 | **Early: depth-only feasibility (June)** | Mistral-7B-v0.3 | sublayer masks only, 16-bit | parameter count | WikiText-2, 8,192 tokens, length 2,048 | G10/O8 | WikiText-2 perplexity |
-| **R: exact-budget replays** | as F | as F | exact group-wise | — (no search) | evaluation only | as F, plus calibration KL |
+| **R: exact-budget replays** | as F | as F | exact group-wise | — (no search) | evaluation only, rebuilt environment with the F package versions | as F, plus calibration KL |
 
 Level databases:
 
@@ -92,20 +92,20 @@ numerically comparable with protocol F.
 
 | RQ | Covered at the exact budget (F) | Covered only in screening | Gaps |
 | --- | --- | --- | --- |
-| RQ1 | E1 uniform, E2 quantization-only, joint at 12.5% and 25% | sequential and independent compositions (S), heuristic masks (Early, 16-bit) | no heuristic or independent baseline at T → planned R tier C; sequential search at T → proposed |
+| RQ1 | E1 uniform, E2 quantization-only, joint at 12.5% and 25%; replays: heuristic masks, independent compositions, 16-bit references | sequential searches (S) | sequential search at T → proposed only; independent masks not effort-matched |
 | RQ2 | standard vs IA (3 seeds), depth-warm (1), population (2), local exchange (1), horizon G20 vs G150 | joint-aware, strength schedules, component and layer-bundle crossover, sequential warm starts | single-seed DW and LX; P4 has +33% tokens |
-| RQ3 | none | attribution replay matrices (S, S-attn) | full-space contrasts → planned R tiers A/B |
+| RQ3 | replays: shared-gene exchanges (2 repair-free pairs, 5 repaired seed pairs), plain crossings, allocation attribution | attribution replay matrices (S, S-attn) | no control for the cost of repairing optimized genes |
 
 ## 5. Planned and proposed additions (not run)
 
 | ID | What | Cost (estimate) | Status | Tooling |
 | --- | --- | --- | --- | --- |
-| R-0 | Re-evaluate 7 finals + E1 in the replay harness | in R batch | planned | `evo_exact_replay.py` |
-| R-A | Repair-free shared-gene exchange: E3 seed 1 × DW; J12 seeds 0 × 1; plus plain crossing with 3 repair seeds | in R batch | planned | `scripts/plan_exact_replays.py` |
-| R-B | Shared-gene exchange for the other E3 and J12 seed pairs, exclusive repair, 3 repair seeds | in R batch | planned | same |
-| R-C | RQ1 at T: heuristic masks (late, late-keep-last, random ×3, block influence) + near-uniform precision at 25% and 12.5%; independent composition (depth-only masks × E2 profiles); joint masks × near-uniform / × E2 | in R batch | planned | same |
-| R-D | 16-bit depth-only evaluation of joint, depth-only and heuristic masks | in R batch | planned | same |
-| R total | 97 evaluation jobs | ~5–8 GPU-hours (estimated from E1's 237 s evaluation run) | planned | `scripts/run_exact_replays.sh` |
+| R-0 | Re-evaluate 7 finals + E1 in the replay harness | in R batch | **done** (exact reproduction) | `evo_exact_replay.py` |
+| R-A | Repair-free shared-gene exchange: E3 seed 1 × DW; J12 seeds 0 × 1; plus plain crossing with 3 repair seeds | in R batch | **done** | `scripts/plan_exact_replays.py` |
+| R-B | Shared-gene exchange for the other E3 and J12 seed pairs, exclusive repair, 3 repair seeds | in R batch | **done** | same |
+| R-C | RQ1 at T: heuristic masks (late, late-keep-last, random ×3, block influence) + near-uniform precision at 25% and 12.5%; independent composition (depth-only masks × E2 profiles); joint masks × near-uniform / × E2 | in R batch | **done** | same |
+| R-D | 16-bit depth-only evaluation of joint, depth-only and heuristic masks | in R batch | **done** | same |
+| R total | 97 evaluation jobs | measured: 359 s per job, ~10 h total | **done 2026-10-09**, results in `results/exact_replays/replay_20261008/` | `evo_exact_replay.py` |
 | D125 | 16-bit depth-only masks at 12.5% (S-protocol, 3 seeds) for 12.5% compositions | ~30 min | proposed | stage `depth125` |
 | SEQ | structure → quantization, frozen mask, at T, G150 | ~30–40 GPU-hours per seed | proposed (opt-in mode implemented) | stage `frozen` |
 | LM | LM-eval on full-space finals (E1, E2, J12, E3) | a few GPU-hours | proposed | `lmeval.py` |
