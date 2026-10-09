@@ -1,0 +1,305 @@
+{
+  "version": 1,
+  "purpose": "zero-shot LM-eval of full-space final models",
+  "reference_bitwidth": 3,
+  "levels": [
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "sources": {
+    "E2s0": "thesis_results/datalab_raw/paper_matched/quant_only/quant_only_seed0_attempt12_resume_20260826/final_candidate.json",
+    "E2s1": "thesis_results/datalab_raw/paper_matched/quant_only/quant_only_seed1_attempt4_resume_20260828/final_candidate.json",
+    "E2s2": "thesis_results/datalab_raw/paper_matched/quant_only/quant_only_seed2_attempt2_resume_20260830/final_candidate.json",
+    "J12s0": "thesis_results/datalab_raw/fullspace_extensions/fullspace_joint_s0125_g150_seed0_attempt1/final_candidate.json",
+    "J12s1": "thesis_results/datalab_raw/fullspace_extensions/fullspace_joint_s0125_g150_seed1_attempt1/final_candidate.json",
+    "J12s2": "thesis_results/datalab_raw/fullspace_extensions/fullspace_joint_s0125_g150_seed2_attempt1/final_candidate.json",
+    "E3s0": "thesis_results/datalab_raw/paper_matched/joint/joint_seed0_attempt1_20260831/final_candidate.json",
+    "E3s1": "thesis_results/datalab_raw/paper_matched/joint/joint_seed1_attempt3_resume_20260902/final_candidate.json",
+    "E3s2": "thesis_results/datalab_raw/paper_matched/joint/joint_seed2_attempt1_20260903/final_candidate.json"
+  },
+  "jobs": [
+    {
+      "id": "dense",
+      "tier": "L",
+      "rq": "RQ1 reference",
+      "purpose": "dense 16-bit model (E0)",
+      "mask": {
+        "rule": "none"
+      },
+      "precision": "fp16"
+    },
+    {
+      "id": "own_uniform3",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "uniform 3-bit quantization (E1)",
+      "mask": {
+        "rule": "none"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "uniform",
+        "bitwidth": 3
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "own_E2s0",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "completed final candidate, as stored",
+      "mask": {
+        "source": "E2s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "E2s0",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "own_E2s1",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "completed final candidate, as stored",
+      "mask": {
+        "source": "E2s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "E2s1",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "own_E2s2",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "completed final candidate, as stored",
+      "mask": {
+        "source": "E2s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "E2s2",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "own_J12s0",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "completed final candidate, as stored",
+      "mask": {
+        "source": "J12s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "J12s0",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        4,
+        4
+      ]
+    },
+    {
+      "id": "own_J12s1",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "completed final candidate, as stored",
+      "mask": {
+        "source": "J12s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "J12s1",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        4,
+        4
+      ]
+    },
+    {
+      "id": "own_J12s2",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "completed final candidate, as stored",
+      "mask": {
+        "source": "J12s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "J12s2",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        4,
+        4
+      ]
+    },
+    {
+      "id": "own_E3s0",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "completed final candidate, as stored",
+      "mask": {
+        "source": "E3s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "E3s0",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "own_E3s1",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "completed final candidate, as stored",
+      "mask": {
+        "source": "E3s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "E3s1",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "own_E3s2",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "completed final candidate, as stored",
+      "mask": {
+        "source": "E3s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "E3s2",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        8,
+        8
+      ]
+    }
+  ]
+}

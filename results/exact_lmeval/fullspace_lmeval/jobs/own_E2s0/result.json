@@ -1,0 +1,96 @@
+{
+  "details": {
+    "bits_sha256": "57d0ff950753279d932b780747a8fa969ea6c16a3abc4480b98380ff63947b52",
+    "cost_bits": 26982023168,
+    "pre_repair_deficits": [
+      0,
+      0,
+      0
+    ],
+    "removed_attn": [],
+    "removed_mlp": [],
+    "repair_changed_active_only": true,
+    "repair_changed_genes": 0,
+    "repair_changes": {},
+    "repair_levels_moved": 0
+  },
+  "job": {
+    "bits": {
+      "fill": "donor",
+      "source": "E2s0"
+    },
+    "id": "own_E2s0",
+    "mask": {
+      "source": "E2s0"
+    },
+    "precision": "quantized",
+    "purpose": "completed final candidate, as stored",
+    "removed": [
+      0,
+      0
+    ],
+    "repair": {
+      "scope": "none",
+      "seed": 0
+    },
+    "rq": "RQ1",
+    "static_deficits": [
+      0,
+      0,
+      0
+    ],
+    "tier": "L"
+  },
+  "scores": {
+    "arc_easy": {
+      "acc": 0.7554713804713805,
+      "acc_norm": 0.7411616161616161,
+      "acc_norm_stderr": 0.008987501845758047,
+      "acc_stderr": 0.00881946110682261,
+      "metric": "acc_norm",
+      "n_samples": 2376,
+      "score": 0.7411616161616161,
+      "stderr": 0.008987501845758047
+    },
+    "piqa": {
+      "acc": 0.7693144722524483,
+      "acc_norm": 0.7856365614798694,
+      "acc_norm_stderr": 0.009574842136050933,
+      "acc_stderr": 0.009828959550983089,
+      "metric": "acc_norm",
+      "n_samples": 1838,
+      "score": 0.7856365614798694,
+      "stderr": 0.009574842136050933
+    },
+    "winogrande": {
+      "acc": 0.6890292028413575,
+      "acc_norm": null,
+      "acc_norm_stderr": null,
+      "acc_stderr": 0.01300953473628607,
+      "metric": "acc",
+      "n_samples": 1267,
+      "score": 0.6890292028413575,
+      "stderr": 0.01300953473628607
+    }
+  },
+  "seconds": 272.74646067619324,
+  "settings": {
+    "attn_implementation": "sdpa",
+    "base_model": "mistralai/Mistral-7B-v0.3",
+    "batch_size": 4,
+    "dtype": "float16",
+    "limit": null,
+    "lm_eval_version": "0.4.13",
+    "num_fewshot": 0,
+    "quant_db": "/home/jovyan/evopress_quant_stage1_1gpu_diskspill_attempt3_20260819/Mistral-7B-v0.3/3bit",
+    "target_bitwidth": 3,
+    "tasks": [
+      "arc_easy",
+      "piqa",
+      "winogrande"
+    ],
+    "tokenizer": "mistralai/Mistral-7B-v0.3 (fast)"
+  },
+  "status": "completed",
+  "target_bits": 26982023168
+}
