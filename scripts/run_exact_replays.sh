@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Exact-budget evaluation-only replays (RQ1 baselines, RQ3 interaction) and the
-# optional structure-first sequential baseline. Nothing here was run as part of
-# the completed experiments; see thesis_results/exact_replay_plan/README.md.
+# optional structure-first sequential baseline. The 97-job batch was run on
+# 2026-10-08/09 (results/exact_replays/replay_20261008); see
+# thesis_results/exact_replay_plan/README.md. The plan stage refuses to
+# overwrite an existing plan.
 #
 # Stages (STAGES env var, default "plan replay summary"):
 #   depth125  cheap 16-bit depth-only searches at 12.5% (3 seeds, ~10 min each),
-#             same protocol as thesis_medium_depth_mistral_s0.25_g20_o16_seed*
+#             same launcher and protocol as thesis_medium_depth_mistral_s0.25_g20_o16_seed*
 #   plan      write the replay plan (CPU only)
 #   replay    run evo_exact_replay.py (GPU; one process, jobs resumable)
 #   summary   compute contrasts and baseline tables (CPU only)
@@ -26,19 +28,20 @@ RUN_FROZEN="${RUN_FROZEN:-0}"
 has_stage() { [[ " ${STAGES} " == *" $1 "* ]]; }
 
 if has_stage depth125; then
-  for seed in 0 1 2; do
-    "${PYTHON}" evo_drop_search.py --model_name_or_path mistralai/Mistral-7B-v0.3 --sparsity 0.125 \
-      --calibration_data wikitext2 --calibration_tokens 8192 --calibration_sequence_length 1024 \
-      --eval_every 5 --eval_datasets wikitext2 --eval_sequence_length 1024 --population_size 1 \
-      --generations 20 --offspring 16 --initially_generated 32 --initial_tokens 512 \
-      --survivors_per_selection 8 2 1 --tokens_per_selection 512 2048 8192 --fitness_fn kl \
-      --use_fast_tokenizer --drop_config_dir "results/runs/thesis_medium_depth_mistral_s0.125_g20_o16_seed${seed}" \
-      --seed "${seed}" --dtype float16 --attn_implementation sdpa
-  done
+  # Same launcher and protocol as thesis_medium_depth_mistral_s0.25_g20_o16_seed*
+  # (scripts/run_mistral_medium_grid.sh, METHODS=depth); only the sparsity differs.
+  # Writes results/runs/thesis_medium_depth_mistral_s0.125_g20_o16_seed{0,1,2}/.
+  RUN_DENSE=0 METHODS=depth DEPTH_SPARSITY=0.125 SEEDS="0 1 2" PYTHON_BIN="${PYTHON}" \
+    EXPERIMENT_LOG="${EXPERIMENT_LOG:-results/experiment_log_depth125.csv}" \
+    bash scripts/run_mistral_medium_grid.sh
   INCLUDE_125=1
 fi
 
 if has_stage plan; then
+  if [[ -f "${PLAN_DIR}/replay_plan.json" && "${OVERWRITE_PLAN:-0}" != "1" ]]; then
+    echo "Refusing to overwrite ${PLAN_DIR}/replay_plan.json (set PLAN_DIR to a new directory or OVERWRITE_PLAN=1)." >&2
+    exit 2
+  fi
   extra=()
   [[ "${INCLUDE_125}" == "1" ]] && extra+=(--include_depth_only_125)
   "${PYTHON}" scripts/plan_exact_replays.py --output_dir "${PLAN_DIR}" "${extra[@]}"
