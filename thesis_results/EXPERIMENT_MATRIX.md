@@ -1,8 +1,18 @@
-# Experiment matrix (verified 2026-10-08)
+# Experiment matrix (verified 2026-10-08; seed-gap audit re-verified 2026-10-23)
 
 Every entry below was checked against run artifacts in this repository:
 `thesis_results/datalab_raw/` (run summaries, commands, generation logs),
 `thesis_results/fullspace_ledger.csv`, and `results/runs/`. Status values:
+
+**2026-10-23 update:** D125 and LM (below) were completed on 2026-10-09
+(commits `e0950c8`, `35aa779`, `5e03da9`; see
+`claude/gpu-runs-2026-10-09-results.md`) and their rows are updated
+accordingly. New launcher scripts for the three remaining protocol-F
+seed gaps (DW seeds 1/2, P4 seed 2, LX seeds 1/2 — the "+seeds" row)
+were added under `thesis_results/datalab_raw/launchers/`; see
+`thesis_results/datalab_raw/launchers/README_seed_completion_2026-10-23.md`
+for the launch plan. SEQ and diversity-based parent selection are
+unchanged (still gated on an explicit decision / not planned).
 
 * **done**: run summary and final candidate present;
 * **partial**: fewer seeds than the other conditions of the same comparison;
@@ -106,10 +116,10 @@ numerically comparable with protocol F.
 | R-C | RQ1 at T: heuristic masks (late, late-keep-last, random ×3, block influence) + near-uniform precision at 25% and 12.5%; independent composition (depth-only masks × E2 profiles); joint masks × near-uniform / × E2 | in R batch | **done** | same |
 | R-D | 16-bit depth-only evaluation of joint, depth-only and heuristic masks | in R batch | **done** | same |
 | R total | 97 evaluation jobs | measured: 359 s per job, ~10 h total | **done 2026-10-09**, results in `results/exact_replays/replay_20261008/` | `evo_exact_replay.py` |
-| D125 | 16-bit depth-only masks at 12.5% (S-protocol, 3 seeds) for 12.5% compositions | ~30 min | proposed | stage `depth125` |
-| SEQ | structure → quantization, frozen mask, at T, G150 | ~30–40 GPU-hours per seed | proposed (opt-in mode implemented) | stage `frozen` |
-| LM | LM-eval on full-space finals (E1, E2, J12, E3) | a few GPU-hours | proposed | `lmeval.py` |
-| +seeds | extra seeds for DW, P4, LX at G150 | ~35–45 GPU-hours each | proposed (supervisor decision) | existing launchers |
+| D125 | 16-bit depth-only masks at 12.5% (S-protocol, 3 seeds) for 12.5% compositions | ~30 min | **done 2026-10-09** (`results/exact_replays/replay_depth125`, `results/experiment_log_depth125.csv`; commit `e0950c8`) | stage `depth125` |
+| SEQ | structure → quantization, frozen mask, at T, G150 | ~30–40 GPU-hours per seed | proposed (opt-in mode implemented); **still awaiting an explicit go/no-go** — not part of the 2026-10-23 seed-completion batch | stage `frozen` |
+| LM | LM-eval on full-space finals (E1, E2, J12, E3) | a few GPU-hours | **done 2026-10-09** (11 models incl. E0; `35aa779`; independent compositions in `5e03da9`) | `lmeval.py` |
+| +seeds | extra seeds for DW, P4, LX at G150 | ~35–45 GPU-hours each | **launch scripts prepared 2026-10-23** (supervisor decision confirmed per 2026-10-23 instruction); not yet run | existing launchers, 5 new ones added 2026-10-23 |
 
 Not planned: diversity-based parent selection (implemented, never run); the
 6.25% run; further screening.
