@@ -65,7 +65,7 @@ Metrics: mean ± population SD over seeds (ledger). PPL = perplexity.
 | J6 | joint, standard | 0.0625 | random | standard | 1 | – | 20 | 0 | – | – | – | – | not run (no output) | – |
 | IA | joint, interaction-aware | 0.25 | random | IA | 1 | – | 150 | 0, 1, 2 | 22,350 / 176,947,200 | 10.206 ± 0.645 | 13.435 ± 0.224 | 0.525 | done | RQ2 |
 | IA-G20 | joint, interaction-aware | 0.25 | random | IA | 1 | – | 20 | 0 | 2,980 / 23,592,960 | 10.898 | 13.992 | 0.560 | done (1 seed) | RQ2 |
-| DW | depth → joint, warm | 0.25 | depth-only mask (S-protocol, WikiText-2, G20) | standard | 1 | – | 150 | 0 | 22,350 / 176,947,200 + stage 1 | 9.234 | 12.664 | 0.472 | partial (1 seed) | RQ2 |
+| DW | depth → joint, warm | 0.25 | depth-only mask (S-protocol, WikiText-2, G20) | standard | 1 | – | 150 | 0, 1 | 22,350 / 176,947,200 + stage 1 | 9.234, 9.109 | 12.664, 12.547 | 0.472, 0.458 | partial (2 seeds) | RQ2 |
 | DW-G20 | depth → joint, warm | 0.25 | as DW | standard | 1 | – | 20 | 0 | 2,980 / 23,592,960 + stage 1 | 9.883 | 13.430 | 0.511 | done (1 seed) | RQ2 |
 | P4 | joint, population | 0.25 | 4 random, evaluated on 2,048 tokens | standard | 4 | – | 150 | 0, 1, 2 | 22,804 / 235,937,792 | 9.068 ± 0.220 | 12.453 ± 0.022 | 0.467 | done | RQ2 |
 | LX | joint, local-exchange crossover | 0.25 | 4 random | standard | 4 | local exchange, p_c = 0.5 | 150 | 0 | 22,804 / 235,937,792 | 9.508 | 12.547 | 0.446 | partial (1 seed) | RQ2 |
@@ -103,7 +103,7 @@ numerically comparable with protocol F.
 | RQ | Covered at the exact budget (F) | Covered only in screening | Gaps |
 | --- | --- | --- | --- |
 | RQ1 | E1 uniform, E2 quantization-only, joint at 12.5% and 25%; replays: heuristic masks, independent compositions, 16-bit references | sequential searches (S) | sequential search at T → proposed only; independent masks not effort-matched |
-| RQ2 | standard vs IA (3 seeds), depth-warm (1), population (3, done 2026-10-25), local exchange (1), horizon G20 vs G150 | joint-aware, strength schedules, component and layer-bundle crossover, sequential warm starts | single-seed DW and LX (seeds 1/2 launched 2026-10-25, running); P4 has +33% tokens even at 3 seeds |
+| RQ2 | standard vs IA (3 seeds), depth-warm (2, seed 1 added 2026-10-27, resumed from a crash at G140), population (3, done 2026-10-25), local exchange (1), horizon G20 vs G150 | joint-aware, strength schedules, component and layer-bundle crossover, sequential warm starts | DW missing seed 2; LX still single-seed (seed 1 launched 2026-10-27, running; seed 2 queued); P4 has +33% tokens even at 3 seeds |
 | RQ3 | replays: shared-gene exchanges (2 repair-free pairs, 5 repaired seed pairs), plain crossings, allocation attribution | attribution replay matrices (S, S-attn) | no control for the cost of repairing optimized genes |
 
 ## 5. Planned and proposed additions (not run)
@@ -119,7 +119,7 @@ numerically comparable with protocol F.
 | D125 | 16-bit depth-only masks at 12.5% (S-protocol, 3 seeds) for 12.5% compositions | ~30 min | **done 2026-10-09** (`results/exact_replays/replay_depth125`, `results/experiment_log_depth125.csv`; commit `e0950c8`) | stage `depth125` |
 | SEQ | structure → quantization, frozen mask, at T, G150 | ~30–40 GPU-hours per seed | proposed (opt-in mode implemented); **still awaiting an explicit go/no-go** — not part of the 2026-10-23 seed-completion batch | stage `frozen` |
 | LM | LM-eval on full-space finals (E1, E2, J12, E3) | a few GPU-hours | **done 2026-10-09** (11 models incl. E0; `35aa779`; independent compositions in `5e03da9`) | `lmeval.py` |
-| +seeds | extra seeds for DW, P4, LX at G150 | ~35–45 GPU-hours each | P4 seed 2 **done 2026-10-25** (commit `4ef6dd9`); DW seed 1 **running** (launched 2026-10-25); DW seed 2, LX seeds 1–2 queued | existing launchers, 5 new ones added 2026-10-23 |
+| +seeds | extra seeds for DW, P4, LX at G150 | ~35–45 GPU-hours each | P4 seed 2 **done 2026-10-25** (`4ef6dd9`); DW seed 1 **done 2026-10-27** (`19be9ab`; DataLab server crashed at G140, resumed cleanly from `search_checkpoint.pt` via `run_fullspace_depthwarm_g150_seed1_resume1.sh`); LX seed 1 **running** (launched 2026-10-27); DW seed 2, LX seed 2 queued | existing launchers, 5 new ones added 2026-10-23, 1 resume launcher added 2026-10-27 |
 
 Not planned: diversity-based parent selection (implemented, never run); the
 6.25% run; further screening.
