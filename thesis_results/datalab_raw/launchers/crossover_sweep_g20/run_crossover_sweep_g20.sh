@@ -16,6 +16,20 @@ set -uo pipefail
 # output_dir already has a run_summary.json, and continues with whatever
 # is left -- no manual bookkeeping needed.
 #
+# Watchdog: a single cell has been observed to wedge for hours (CephFS-side
+# I/O stall, not a node-level or GPU problem -- confirmed via low system
+# load + near-zero CPU-time accumulation on the stuck process) while
+# showing 0% GPU util and barely any growth in cumulative CPU time. Each
+# cell therefore runs under a watchdog that polls /proc/<pid>/stat every
+# POLL_INTERVAL_SECONDS; if cumulative CPU time gained is below
+# MIN_CPU_SECONDS_PER_POLL for STALL_LIMIT_SECONDS straight, the process is
+# killed and the sweep moves on to the next cell (the stalled cell has no
+# run_summary.json, so it will be retried on the NEXT full run of this
+# script, same idempotent-skip logic as a crash). CPU time, not log-file
+# mtime, is used as the liveness signal because Python's stdout buffering
+# to a non-tty file can delay writes even while genuinely computing --
+# CPU ticks cannot lie the way buffered output can.
+#
 # Run with nohup, not tmux:
 #   nohup bash run_crossover_sweep_g20.sh > ~/crossover_sweep_driver.log 2>&1 &
 #   disown
@@ -27,6 +41,12 @@ LOG_DIR="$BASE_OUT/sweep_logs"
 mkdir -p "$BASE_OUT" "$LOG_DIR"
 
 QUANT_DB="/home/jovyan/evopress/outputs/experiments/quant_db_mistral_qproj_debug_bits234/quant_db/Mistral-7B-v0.3/3bit"
+
+POLL_INTERVAL_SECONDS=60
+STALL_LIMIT_SECONDS=1800          # 30 min of near-zero CPU progress => stalled
+MIN_CPU_SECONDS_PER_POLL=5         # must gain at least this much CPU time per poll to count as "alive"
+CLK_TCK=$(getconf CLK_TCK)
+stall_count=0
 
 TYPES=(component layer_bundle local_exchange)
 PROBS=(0.0 0.1 0.25 0.5 0.75 1.0)
@@ -54,6 +74,15 @@ prob_label() {
 run_count=0
 skip_count=0
 fail_count=0
+
+get_cpu_ticks() {
+  # Cumulative utime+stime (clock ticks) for a PID, from /proc. Empty
+  # output means the process is already gone.
+  local pid="$1"
+  local fields
+  read -r -a fields < "/proc/$pid/stat" 2>/dev/null || { echo ""; return; }
+  echo $(( ${fields[13]} + ${fields[14]} ))
+}
 
 run_cell() {
   local xtype="$1" prob="$2" seed="$3"
@@ -105,10 +134,48 @@ run_cell() {
     --output_dir "$out_dir" \
     --use_fast_tokenizer \
     --active_quant_budget \
-    > "$log_file" 2>&1
+    > "$log_file" 2>&1 &
+  local pid=$!
 
+  # Watchdog: poll CPU-time growth, not log mtime (buffering can mask real
+  # progress; CPU ticks cannot).
+  local last_ticks
+  last_ticks=$(get_cpu_ticks "$pid")
+  local silent_for=0
+  local min_ticks_per_poll=$(( CLK_TCK * MIN_CPU_SECONDS_PER_POLL ))
+
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep "$POLL_INTERVAL_SECONDS"
+    kill -0 "$pid" 2>/dev/null || break
+    local cur_ticks
+    cur_ticks=$(get_cpu_ticks "$pid")
+    [[ -z "$cur_ticks" ]] && break
+    local delta=$(( cur_ticks - last_ticks ))
+    last_ticks=$cur_ticks
+    if (( delta < min_ticks_per_poll )); then
+      silent_for=$(( silent_for + POLL_INTERVAL_SECONDS ))
+    else
+      silent_for=0
+    fi
+    if (( silent_for >= STALL_LIMIT_SECONDS )); then
+      echo "[STALL] $name: CPU time barely advancing for ${silent_for}s (<${MIN_CPU_SECONDS_PER_POLL}s CPU gained per ${POLL_INTERVAL_SECONDS}s poll) -- killing PID $pid, will retry on next full sweep run"
+      stall_count=$((stall_count + 1))
+      kill -9 "$pid" 2>/dev/null
+      local death_wait=0
+      while kill -0 "$pid" 2>/dev/null; do
+        sleep 10
+        death_wait=$(( death_wait + 10 ))
+        if (( death_wait % 300 == 0 )); then
+          echo "[WARN ] $name: PID $pid still alive ${death_wait}s after SIGKILL (likely wedged in D state) -- still waiting, may need manual check"
+        fi
+      done
+      break
+    fi
+  done
+
+  wait "$pid" 2>/dev/null
   local status=$?
-  if [[ $status -eq 0 ]] && [[ -f "$out_dir/run_summary.json" ]]; then
+  if [[ -f "$out_dir/run_summary.json" ]]; then
     echo "[DONE] $name"
     run_count=$((run_count + 1))
   else
@@ -139,4 +206,4 @@ for prob in "${PROBS[@]}"; do
 done
 
 echo ""
-echo "=== Sweep finished: $run_count run, $skip_count skipped, $fail_count failed ==="
+echo "=== Sweep finished: $run_count run, $skip_count skipped, $fail_count failed, $stall_count killed by watchdog ==="
