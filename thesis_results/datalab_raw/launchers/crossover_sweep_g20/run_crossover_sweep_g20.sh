@@ -16,19 +16,31 @@ set -uo pipefail
 # output_dir already has a run_summary.json, and continues with whatever
 # is left -- no manual bookkeeping needed.
 #
-# Watchdog: a single cell has been observed to wedge for hours (CephFS-side
-# I/O stall, not a node-level or GPU problem -- confirmed via low system
-# load + near-zero CPU-time accumulation on the stuck process) while
-# showing 0% GPU util and barely any growth in cumulative CPU time. Each
-# cell therefore runs under a watchdog that polls /proc/<pid>/stat every
-# POLL_INTERVAL_SECONDS; if cumulative CPU time gained is below
-# MIN_CPU_SECONDS_PER_POLL for STALL_LIMIT_SECONDS straight, the process is
-# killed and the sweep moves on to the next cell (the stalled cell has no
-# run_summary.json, so it will be retried on the NEXT full run of this
-# script, same idempotent-skip logic as a crash). CPU time, not log-file
-# mtime, is used as the liveness signal because Python's stdout buffering
-# to a non-tty file can delay writes even while genuinely computing --
-# CPU ticks cannot lie the way buffered output can.
+# Watchdog: a single cell has been observed to wedge for hours (genuine
+# I/O stall: near-zero CPU-time accumulation AND 0% GPU util for 4+ hours
+# straight, confirmed against a healthy, low-contention node). Each cell
+# runs under a watchdog that polls every POLL_INTERVAL_SECONDS and treats
+# a cell as "alive" if EITHER its cumulative CPU time (from
+# /proc/<pid>/stat) grows by at least MIN_CPU_SECONDS_PER_POLL OR its log
+# file grows at all. A cell is only killed once BOTH signals stay flat for
+# STALL_LIMIT_SECONDS straight.
+#
+# An earlier version used CPU time alone with a 30-minute window and a
+# false-positive rate of 100%: for this workload, long GPU-bound stretches
+# (e.g. "Computing KL Divergence") legitimately leave the host process
+# mostly idle while the GPU does real work, so CPU ticks alone cannot
+# distinguish a genuinely stalled job from a healthy one. Log growth
+# doesn't share that blind spot -- the search script prints fresh content
+# (generation number, eval results) as real progress happens, and every
+# manual check this session has shown that output landing in the log file
+# without meaningful delay, so it is a reliable second signal, not a
+# redundant one. The combination only kills a cell when NEITHER a CPU nor
+# an I/O/GPU-side explanation can be given for its silence -- exactly the
+# profile of the original multi-hour CephFS-side stall this was built for.
+#
+# A stalled/killed cell has no run_summary.json, so it is retried
+# automatically on the NEXT full run of this script, same idempotent-skip
+# logic as a crash.
 #
 # Run with nohup, not tmux:
 #   nohup bash run_crossover_sweep_g20.sh > ~/crossover_sweep_driver.log 2>&1 &
@@ -43,8 +55,8 @@ mkdir -p "$BASE_OUT" "$LOG_DIR"
 QUANT_DB="/home/jovyan/evopress/outputs/experiments/quant_db_mistral_qproj_debug_bits234/quant_db/Mistral-7B-v0.3/3bit"
 
 POLL_INTERVAL_SECONDS=60
-STALL_LIMIT_SECONDS=1800          # 30 min of near-zero CPU progress => stalled
-MIN_CPU_SECONDS_PER_POLL=5         # must gain at least this much CPU time per poll to count as "alive"
+STALL_LIMIT_SECONDS=2700          # 45 min of BOTH signals flat => stalled
+MIN_CPU_SECONDS_PER_POLL=5         # CPU gain per poll that counts as "alive" on its own
 CLK_TCK=$(getconf CLK_TCK)
 stall_count=0
 
@@ -137,10 +149,13 @@ run_cell() {
     > "$log_file" 2>&1 &
   local pid=$!
 
-  # Watchdog: poll CPU-time growth, not log mtime (buffering can mask real
-  # progress; CPU ticks cannot).
+  # Watchdog: a cell counts as "alive" this poll if EITHER its CPU time
+  # grew by at least MIN_CPU_SECONDS_PER_POLL OR its log file grew at all.
+  # Only kill once NEITHER signal has moved for STALL_LIMIT_SECONDS straight.
   local last_ticks
   last_ticks=$(get_cpu_ticks "$pid")
+  local last_log_size
+  last_log_size=$(stat -c %s "$log_file" 2>/dev/null || echo 0)
   local silent_for=0
   local min_ticks_per_poll=$(( CLK_TCK * MIN_CPU_SECONDS_PER_POLL ))
 
@@ -150,15 +165,20 @@ run_cell() {
     local cur_ticks
     cur_ticks=$(get_cpu_ticks "$pid")
     [[ -z "$cur_ticks" ]] && break
-    local delta=$(( cur_ticks - last_ticks ))
+    local cur_log_size
+    cur_log_size=$(stat -c %s "$log_file" 2>/dev/null || echo "$last_log_size")
+    local cpu_delta=$(( cur_ticks - last_ticks ))
+    local log_grew=0
+    [[ "$cur_log_size" != "$last_log_size" ]] && log_grew=1
     last_ticks=$cur_ticks
-    if (( delta < min_ticks_per_poll )); then
+    last_log_size=$cur_log_size
+    if (( cpu_delta < min_ticks_per_poll )) && (( log_grew == 0 )); then
       silent_for=$(( silent_for + POLL_INTERVAL_SECONDS ))
     else
       silent_for=0
     fi
     if (( silent_for >= STALL_LIMIT_SECONDS )); then
-      echo "[STALL] $name: CPU time barely advancing for ${silent_for}s (<${MIN_CPU_SECONDS_PER_POLL}s CPU gained per ${POLL_INTERVAL_SECONDS}s poll) -- killing PID $pid, will retry on next full sweep run"
+      echo "[STALL] $name: no CPU progress (<${MIN_CPU_SECONDS_PER_POLL}s/poll) AND no log growth for ${silent_for}s -- killing PID $pid, will retry on next full sweep run"
       stall_count=$((stall_count + 1))
       kill -9 "$pid" 2>/dev/null
       local death_wait=0
