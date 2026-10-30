@@ -16,6 +16,14 @@ set -uo pipefail
 # output_dir already has a run_summary.json, and continues with whatever
 # is left -- no manual bookkeeping needed.
 #
+# Execution order is breadth-first by seed (see the main loop at the
+# bottom): every (type, probability) combination gets its seed-0 cell
+# before anything gets a seed-1 or seed-2 cell. This way a complete,
+# presentable picture of the whole hyperparameter space exists as early
+# as possible, with extra seeds (full mean+-SD statistics) layered on
+# top opportunistically rather than risking full depth on a few
+# combinations and zero data on the rest if time runs out.
+#
 # Watchdog: a single cell has been observed to wedge for hours (genuine
 # I/O stall: near-zero CPU-time accumulation AND 0% GPU util for 4+ hours
 # straight, confirmed against a healthy, low-contention node). Each cell
@@ -87,6 +95,10 @@ run_count=0
 skip_count=0
 fail_count=0
 
+log() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
 get_cpu_ticks() {
   # Cumulative utime+stime (clock ticks) for a PID, from /proc. Empty
   # output means the process is already gone.
@@ -105,12 +117,12 @@ run_cell() {
   local log_file="$LOG_DIR/${name}.log"
 
   if [[ -f "$out_dir/run_summary.json" ]]; then
-    echo "[SKIP] $name already has run_summary.json"
+    log "[SKIP] $name already has run_summary.json"
     skip_count=$((skip_count + 1))
     return 0
   fi
 
-  echo "[RUN ] $name -> $log_file"
+  log "[RUN ] $name -> $log_file"
   mkdir -p "$out_dir"
 
   python evo_joint_search.py \
@@ -178,7 +190,7 @@ run_cell() {
       silent_for=0
     fi
     if (( silent_for >= STALL_LIMIT_SECONDS )); then
-      echo "[STALL] $name: no CPU progress (<${MIN_CPU_SECONDS_PER_POLL}s/poll) AND no log growth for ${silent_for}s -- killing PID $pid, will retry on next full sweep run"
+      log "[STALL] $name: no CPU progress (<${MIN_CPU_SECONDS_PER_POLL}s/poll) AND no log growth for ${silent_for}s -- killing PID $pid, will retry on next full sweep run"
       stall_count=$((stall_count + 1))
       kill -9 "$pid" 2>/dev/null
       local death_wait=0
@@ -186,7 +198,7 @@ run_cell() {
         sleep 10
         death_wait=$(( death_wait + 10 ))
         if (( death_wait % 300 == 0 )); then
-          echo "[WARN ] $name: PID $pid still alive ${death_wait}s after SIGKILL (likely wedged in D state) -- still waiting, may need manual check"
+          log "[WARN ] $name: PID $pid still alive ${death_wait}s after SIGKILL (likely wedged in D state) -- still waiting, may need manual check"
         fi
       done
       break
@@ -196,27 +208,36 @@ run_cell() {
   wait "$pid" 2>/dev/null
   local status=$?
   if [[ -f "$out_dir/run_summary.json" ]]; then
-    echo "[DONE] $name"
+    log "[DONE] $name"
     run_count=$((run_count + 1))
   else
-    echo "[FAIL] $name (exit $status) -- see $log_file"
+    log "[FAIL] $name (exit $status) -- see $log_file"
     fail_count=$((fail_count + 1))
   fi
 }
 
-for prob in "${PROBS[@]}"; do
-  if [[ "$prob" == "0.0" ]]; then
-    # Crossover type has no effect when probability is 0; one cell per seed.
-    for seed in "${SEEDS[@]}"; do
-      [[ "$seed" == "0" ]] && { echo "[SKIP] p_c=0.0 seed0 (existing: joint_g20_population_pop4_seed0)"; skip_count=$((skip_count + 1)); continue; }
+# Breadth-first ordering: seed is the OUTER loop, so every (type,
+# probability) combination gets its first seed before anything gets a
+# second or third. This guarantees that if time runs out, what exists is
+# a complete single-seed picture of the whole hyperparameter space
+# (directly answering "explore every combination, don't just try one and
+# give up") rather than full 3-seed depth on a few combinations and zero
+# data on the rest. Extra seeds (for proper mean+-SD statistics) accumulate
+# on top of that as time allows, each pass strictly improving on the last.
+for seed in "${SEEDS[@]}"; do
+  for prob in "${PROBS[@]}"; do
+    if [[ "$prob" == "0.0" ]]; then
+      if [[ "$seed" == "0" ]]; then
+        log "[SKIP] p_c=0.0 seed0 (existing: joint_g20_population_pop4_seed0)"
+        skip_count=$((skip_count + 1))
+        continue
+      fi
       run_cell "component" "$prob" "$seed"
-    done
-    continue
-  fi
-  for xtype in "${TYPES[@]}"; do
-    for seed in "${SEEDS[@]}"; do
+      continue
+    fi
+    for xtype in "${TYPES[@]}"; do
       if [[ "$prob" == "0.25" ]] && [[ "$seed" == "0" ]]; then
-        echo "[SKIP] p_c=0.25 $xtype seed0 (existing run)"
+        log "[SKIP] p_c=0.25 $xtype seed0 (existing run)"
         skip_count=$((skip_count + 1))
         continue
       fi
@@ -226,4 +247,4 @@ for prob in "${PROBS[@]}"; do
 done
 
 echo ""
-echo "=== Sweep finished: $run_count run, $skip_count skipped, $fail_count failed, $stall_count killed by watchdog ==="
+log "=== Sweep finished: $run_count run, $skip_count skipped, $fail_count failed, $stall_count killed by watchdog ==="
