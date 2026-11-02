@@ -2,6 +2,16 @@
 set -uo pipefail
 # Deliberately NOT 'set -e': one cell's failure must not abort the sweep.
 
+# Activate the Python venv explicitly -- do not rely on the launching
+# shell already having it active. A relaunch after a container reset
+# (2026-10-30 22:02, after "the server reset") ran in a fresh shell with
+# no env active: `python` silently resolved to a bare interpreter with no
+# packages installed, so all 39 cells attempted that night failed in
+# under a second each with "ModuleNotFoundError: No module named
+# 'numpy'". Sourcing the venv here makes the script self-contained
+# regardless of what state the launching shell happens to be in.
+source ~/venvs/evopress-sep2026/bin/activate
+
 # Full crossover hyperparameter sweep, cheap S-protocol (q_proj-only debug
 # quant DB, WikiText-2 calibration, G20). Grid: 3 crossover types x
 # {0.1, 0.25, 0.5, 0.75, 1.0} crossover_probability, plus the p_c=0.0
