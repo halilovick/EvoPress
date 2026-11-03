@@ -157,6 +157,32 @@ def job(job_id, tier, rq, purpose, mask, bits=None, repair=None, precision="quan
     return entry
 
 
+def random_fill_jobs(mask_label, other_label, deficits, tier, purpose):
+    """Null-control jobs matched to a Tier B shared-gene exchange.
+
+    Same mask, same eligible (exclusive) pool, the same per-group deficit
+    (``deficits``, read off the real exchange's own ``owner_deficits_*`` in
+    ``pair_analysis``) and the same production exclusive-repair step as
+    ``x_owner_exclusive_{mask}_Q{other}_r*`` -- the only difference is that
+    the deficit is placed at random within the shared-gene pool instead of
+    arising from ``other_label``'s real values. Three seeds, matching
+    ``REPAIR_SEEDS``, so the null distribution is estimated with the same
+    effort as the real repair-seed average.
+    """
+    return [
+        job(
+            f"rnd_{mask_label}_vs_{other_label}_r{seed}",
+            tier, "RQ3", purpose,
+            {"source": mask_label},
+            {"rule": "random_fill", "source": mask_label, "eligible_from": other_label,
+             "deficits": list(deficits), "seed": seed},
+            {"scope": "exclusive", "seed": seed},
+            pair={"a": mask_label, "b": other_label, "mask": mask_label, "bits": "random", "fill": "random"},
+        )
+        for seed in REPAIR_SEEDS
+    ]
+
+
 def crossed_jobs(a, b, fill, scope, tier, purpose, deficits_ab, deficits_ba):
     """Jobs for (D_A, Q_B) and (D_B, Q_A); repaired jobs get several seeds."""
     jobs = []
@@ -207,6 +233,19 @@ def build_plan(sources, groups, analysis, include_125: bool) -> dict[str, Any]:
             continue
         jobs += crossed_jobs(a, b, "owner", "exclusive", "B", "shared-gene exchange, minimal repair",
                              r["owner_deficits_DA_QB"], r["owner_deficits_DB_QA"])
+    # Tier B-ctrl: null control for Tier B. Isolates whether Tier B's negative
+    # RQ3 interaction contrasts are explained by perturbing the mask owner's
+    # own shared genes at all, rather than by the other mask's specific
+    # content -- the repair-cost confound identified in
+    # replay-findings-2026-10-09.md, point 9.
+    for a, b in (("E3s0", "E3s1"), ("E3s0", "E3s2"), ("E3s1", "E3s2"), ("J12s0", "J12s2"), ("J12s1", "J12s2")):
+        r = by_pair[(a, b)]
+        if r["owner_repair_free_pair"]:
+            continue
+        jobs += random_fill_jobs(a, b, r["owner_deficits_DA_QB"], "B-ctrl",
+                                  "null control: deficit-matched random shared-gene fill")
+        jobs += random_fill_jobs(b, a, r["owner_deficits_DB_QA"], "B-ctrl",
+                                  "null control: deficit-matched random shared-gene fill")
 
     # Tier C: RQ1 baselines under the exact budget.
     for sparsity, k in ((0.25, 8), (0.125, 4)):

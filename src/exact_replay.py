@@ -461,6 +461,81 @@ def shift_to_budget(
     return out
 
 
+def random_fill_bits(
+    mask_owner: Mapping[str, Any],
+    other_drop: Mapping[str, Sequence[bool]],
+    mask_drop: Mapping[str, Sequence[bool]],
+    groups: Sequence[Sequence[str]],
+    deficits: Sequence[int],
+    seed: int,
+    levels: Sequence[int] = (2, 3, 4, 5, 6),
+) -> dict[str, int]:
+    """A null-control analogue of ``fill_bits(..., fill="owner")``.
+
+    A real shared-gene exchange overwrites the mask owner's genes that are
+    *shared* with a real donor (active under both ``mask_drop`` and
+    ``other_drop``) with the donor's real values, which creates a per-group
+    deficit of ``deficits`` (``level_deficits`` of that real exchange,
+    already computed by ``scripts/plan_exact_replays.py`` for the real Tier B
+    job this control matches) that the production exclusive-repair then
+    corrects. This control reproduces the identical per-group deficit --
+    so it is repaired by the identical mechanism, with the identical
+    eligible pool, changing a directly comparable number of genes by a
+    directly comparable total magnitude -- but places it at random within
+    the shared-gene pool, one bit-level step at a time, using zero
+    information about the other candidate's actual values. It isolates
+    whether a repaired shared-gene exchange's negative RQ3 interaction
+    (``replay-findings-2026-10-09.md``, point 9) reflects genuine mask x
+    quantization interaction or just the cost of perturbing some of the mask
+    owner's optimized shared genes by about that much, regardless of where
+    the perturbation came from ("the repair changes 2-6 of the mask owner's
+    optimized genes ... any perturbation of an optimized configuration tends
+    to raise J ... these contrasts are an upper bound on the interaction,
+    not evidence for it").
+
+    (An earlier version drew the shared genes' replacement values
+    independently -- first uniformly over ``levels``, then by resampling
+    with replacement from the owner's own values at those genes. Both
+    produced deficits of 10-40 bit-levels per group from independent-gene
+    variance alone, versus 1-7 for any real donor pair, which blew through
+    the exclusive-repair capacity and silently fell back to full-budget
+    repair: not a matched control. Targeting the real deficit directly, as
+    here, sidesteps that.)
+
+    One caveat: the random walk below tends to touch somewhat more genes by
+    a smaller amount each than the production repair's subset-sum DP, which
+    can concentrate a deficit onto fewer genes moved further. If the null
+    perturbation's cost turns out to depend on concentration as well as
+    total magnitude, this control is, if anything, the gentler of the two.
+    """
+    rng = random.Random(seed)
+    lo, hi = min(levels), max(levels)
+    bits = dict(mask_owner["bits"])
+    for group, delta in zip(groups, deficits):
+        if delta == 0:
+            continue
+        shared = [
+            name for name in group
+            if module_is_active(name, mask_drop) and module_is_active(name, other_drop)
+        ]
+        if not shared:
+            raise ValueError("Nonzero deficit in a group with no shared genes to place it in.")
+        # level_deficits' convention is required - actual; the owner's own
+        # candidate starts exactly balanced (actual == required), so
+        # realizing a deficit of `delta` means changing this group's actual
+        # sum by exactly -delta.
+        remaining = -delta
+        while remaining != 0:
+            step = 1 if remaining > 0 else -1
+            candidates = [name for name in shared if lo <= bits[name] + step <= hi]
+            if not candidates:
+                raise ValueError(f"Shared pool exhausted before placing a deficit of {delta}.")
+            name = rng.choice(candidates)
+            bits[name] += step
+            remaining -= step
+    return bits
+
+
 def build_replay_bits(
     job: Mapping[str, Any],
     mask_drop: Mapping[str, Sequence[bool]],
@@ -488,6 +563,16 @@ def build_replay_bits(
         if spec["rule"] == "uniform":
             value = int(spec["bitwidth"])
             return {name: value for group in groups for name in group}, None
+        if spec["rule"] == "random_fill":
+            owner = sources[spec["source"]]
+            other = sources[spec["eligible_from"]]
+            bits = random_fill_bits(
+                owner, other["drop"], mask_drop, groups,
+                spec["deficits"], int(spec.get("seed", 0)),
+                levels=spec.get("levels", (2, 3, 4, 5, 6)),
+            )
+            eligibility = eligibility_drop_state(mask_drop, other["drop"]) if scope == "exclusive" else None
+            return bits, eligibility
         raise ValueError(f"Unknown bit rule: {spec['rule']}")
     donor = sources[spec["source"]]
     owner_label = (job.get("mask") or {}).get("source")

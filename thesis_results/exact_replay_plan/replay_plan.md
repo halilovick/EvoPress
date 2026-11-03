@@ -1,6 +1,6 @@
 # Exact-budget replay plan
 
-Jobs: 97
+Jobs: 127
 
 ## Tier 0 (8 jobs)
 
@@ -70,6 +70,41 @@ Jobs: 97
 | `x_owner_exclusive_J12s2_QJ12s1_r0` | RQ3 | shared-gene exchange, minimal repair | exclusive |
 | `x_owner_exclusive_J12s2_QJ12s1_r1` | RQ3 | shared-gene exchange, minimal repair | exclusive |
 | `x_owner_exclusive_J12s2_QJ12s1_r2` | RQ3 | shared-gene exchange, minimal repair | exclusive |
+
+## Tier B-ctrl (30 jobs)
+
+| Job | RQ | Purpose | Repair |
+| --- | --- | --- | --- |
+| `rnd_E3s0_vs_E3s1_r0` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s0_vs_E3s1_r1` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s0_vs_E3s1_r2` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s1_vs_E3s0_r0` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s1_vs_E3s0_r1` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s1_vs_E3s0_r2` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s0_vs_E3s2_r0` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s0_vs_E3s2_r1` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s0_vs_E3s2_r2` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s2_vs_E3s0_r0` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s2_vs_E3s0_r1` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s2_vs_E3s0_r2` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s1_vs_E3s2_r0` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s1_vs_E3s2_r1` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s1_vs_E3s2_r2` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s2_vs_E3s1_r0` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s2_vs_E3s1_r1` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_E3s2_vs_E3s1_r2` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_J12s0_vs_J12s2_r0` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_J12s0_vs_J12s2_r1` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_J12s0_vs_J12s2_r2` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_J12s2_vs_J12s0_r0` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_J12s2_vs_J12s0_r1` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_J12s2_vs_J12s0_r2` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_J12s1_vs_J12s2_r0` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_J12s1_vs_J12s2_r1` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_J12s1_vs_J12s2_r2` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_J12s2_vs_J12s1_r0` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_J12s2_vs_J12s1_r1` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
+| `rnd_J12s2_vs_J12s1_r2` | RQ3 | null control: deficit-matched random shared-gene fill | exclusive |
 
 ## Tier C (30 jobs)
 

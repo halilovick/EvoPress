@@ -2,6 +2,7 @@
 
 import itertools
 import json
+import math
 import random
 import sys
 import tempfile
@@ -177,6 +178,86 @@ class ExactReplayPureTest(unittest.TestCase):
     def test_metadata_constant(self):
         self.assertEqual(er.metadata_bits_per_weight(), Fraction(1, 4))
 
+    def test_random_fill_only_changes_shared_genes_and_matches_deficit(self):
+        a, b = self.sources["E3s0"], self.sources["E3s1"]
+        real_deficits = er.level_deficits(
+            self.groups, er.fill_bits(a, b, a["drop"], self.groups, "owner"), a["drop"]
+        )
+        self.assertTrue(any(real_deficits))  # sanity: this pair actually needs repair
+        bits = er.random_fill_bits(a, b["drop"], a["drop"], self.groups, real_deficits, seed=0)
+        for group in self.groups:
+            for name in group:
+                shared = er.module_is_active(name, a["drop"]) and er.module_is_active(name, b["drop"])
+                if not shared:
+                    self.assertEqual(bits[name], a["bits"][name])
+        # The whole point of the control: it reproduces the exact real deficit.
+        self.assertEqual(er.level_deficits(self.groups, bits, a["drop"]), real_deficits)
+
+    def test_random_fill_is_seed_deterministic_and_varies_with_seed(self):
+        a, b = self.sources["J12s0"], self.sources["J12s2"]
+        deficits = er.level_deficits(
+            self.groups, er.fill_bits(a, b, a["drop"], self.groups, "owner"), a["drop"]
+        )
+        bits0a = er.random_fill_bits(a, b["drop"], a["drop"], self.groups, deficits, seed=0)
+        bits0b = er.random_fill_bits(a, b["drop"], a["drop"], self.groups, deficits, seed=0)
+        bits1 = er.random_fill_bits(a, b["drop"], a["drop"], self.groups, deficits, seed=1)
+        self.assertEqual(bits0a, bits0b)
+        self.assertNotEqual(bits0a, bits1)
+        # Both seeds must still reproduce the same target deficit.
+        self.assertEqual(er.level_deficits(self.groups, bits1, a["drop"]), deficits)
+
+    def test_random_fill_round_trips_through_build_replay_bits(self):
+        # Same (mask, repair-scope) contract as a real Tier B job: build_replay_bits
+        # must hand back bits plus the identical eligibility mask that a real
+        # x_owner_exclusive_{a}_Q{b} job would use.
+        a, b = self.sources["E3s1"], self.sources["E3s2"]
+        deficits = er.level_deficits(
+            self.groups, er.fill_bits(a, b, a["drop"], self.groups, "owner"), a["drop"]
+        )
+        job_entry = {
+            "mask": {"source": "E3s1"},
+            "bits": {"rule": "random_fill", "source": "E3s1", "eligible_from": "E3s2",
+                     "deficits": deficits, "seed": 2},
+            "repair": {"scope": "exclusive", "seed": 2},
+        }
+        bits, eligibility = er.build_replay_bits(job_entry, a["drop"], self.sources, self.groups)
+        expected_elig = er.eligibility_drop_state(a["drop"], b["drop"])
+        self.assertEqual(eligibility, expected_elig)
+        direct = er.random_fill_bits(a, b["drop"], a["drop"], self.groups, deficits, seed=2)
+        self.assertEqual(bits, direct)
+        # And build_replay_bits's result must be the exact real deficit, not
+        # merely "some" deficit -- this is what makes it a matched control.
+        self.assertEqual(er.level_deficits(self.groups, bits, a["drop"]), deficits)
+
+    def test_planner_adds_matched_bctrl_jobs_for_every_tier_b_pair(self):
+        # Tier B's own `pair` field only records the canonical (a, b) order a
+        # pair was analysed in, not which of the two jobs in that call is the
+        # mask owner -- so directions are read off the job ids, which do
+        # encode direction for both tiers (`x_owner_exclusive_{mask}_Q{other}`
+        # and `rnd_{mask}_vs_{other}`).
+        with tempfile.TemporaryDirectory() as tmp:
+            planner.main(["--output_dir", tmp])
+            plan = json.loads((Path(tmp) / "replay_plan.json").read_text())
+
+        def directions(ids, prefix, infix):
+            out = set()
+            for job_id in ids:
+                if not job_id.startswith(prefix):
+                    continue
+                body = job_id[len(prefix):].rsplit("_r", 1)[0]
+                mask, other = body.split(infix)
+                out.add((mask, other))
+            return out
+
+        all_ids = [j["id"] for j in plan["jobs"]]
+        b_directions = directions([j["id"] for j in plan["jobs"] if j["tier"] == "B"], "x_owner_exclusive_", "_Q")
+        ctrl_directions = directions([j["id"] for j in plan["jobs"] if j["tier"] == "B-ctrl"], "rnd_", "_vs_")
+        self.assertEqual(b_directions, ctrl_directions)
+        self.assertTrue(b_directions)  # sanity: not vacuously equal
+        for mask, other in ctrl_directions:
+            ctrl_ids = [i for i in all_ids if i.startswith(f"rnd_{mask}_vs_{other}_r")]
+            self.assertEqual(len(ctrl_ids), len(planner.REPAIR_SEEDS))
+
     def test_summarizer_computes_contrast_from_results(self):
         import csv as _csv
         from scripts import summarize_exact_replays as summ
@@ -205,6 +286,36 @@ class ExactReplayPureTest(unittest.TestCase):
             self.assertAlmostEqual(float(row["wikitext2_nll_I"]), (1.90 + 1.95) - (1.93 + 1.97))
             self.assertAlmostEqual(float(row["wikitext2_nll_delta_a"]), 0.03)
             self.assertAlmostEqual(float(row["wikitext2_nll_delta_b"]), 0.02)
+
+    def test_analyze_null_control_computes_excess_from_results(self):
+        import csv as _csv
+        from scripts import analyze_null_control as nullctrl
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            # math.log(PPL) values chosen so the arithmetic is easy to check by hand:
+            # own=2.00; real crossed mean nll=2.10 (delta_real=+0.10);
+            # null mean nll=2.04 (delta_null=+0.04); excess = +0.06.
+            rows = {
+                "own_E3s0": {"wikitext2_ppl": math.exp(2.00), "repair_changed_genes": 0},
+                "x_owner_exclusive_E3s0_QE3s1_r0": {"wikitext2_ppl": math.exp(2.10), "repair_changed_genes": 3},
+                "rnd_E3s0_vs_E3s1_r0": {"wikitext2_ppl": math.exp(2.04), "repair_changed_genes": 5},
+            }
+            fieldnames = ["id", "status", "wikitext2_ppl", "calibration_kl", "repair_changed_genes"]
+            with (out / "replay_results.csv").open("w", newline="", encoding="utf-8") as handle:
+                writer = _csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
+                writer.writeheader()
+                for job_id, values in rows.items():
+                    writer.writerow({"id": job_id, "status": "completed", "calibration_kl": "", **values})
+            nullctrl.main(["--results_dir", str(out)])
+            records = list(_csv.DictReader((out / "null_control_contrasts.csv").open(encoding="utf-8")))
+            rec = next(r for r in records if r["mask"] == "E3s0" and r["other"] == "E3s1")
+            self.assertAlmostEqual(float(rec["wikitext2_ppl_delta_real"]), 0.10, places=6)
+            self.assertAlmostEqual(float(rec["wikitext2_ppl_delta_null"]), 0.04, places=6)
+            self.assertAlmostEqual(float(rec["wikitext2_ppl_excess"]), 0.06, places=6)
+            self.assertEqual(rec["real_genes"], "3.0")
+            self.assertEqual(rec["null_genes"], "5.0")
+            summary = (out / "null_control_summary.md").read_text(encoding="utf-8")
+            self.assertIn("E3s0", summary)
 
 
 if __name__ == "__main__":

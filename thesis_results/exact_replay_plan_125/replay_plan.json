@@ -1598,6 +1598,1116 @@
       ]
     },
     {
+      "id": "rnd_E3s0_vs_E3s1_r0",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s0",
+        "eligible_from": "E3s1",
+        "deficits": [
+          -3,
+          2,
+          1
+        ],
+        "seed": 0
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 0
+      },
+      "pair": {
+        "a": "E3s0",
+        "b": "E3s1",
+        "mask": "E3s0",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -3,
+        2,
+        1
+      ]
+    },
+    {
+      "id": "rnd_E3s0_vs_E3s1_r1",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s0",
+        "eligible_from": "E3s1",
+        "deficits": [
+          -3,
+          2,
+          1
+        ],
+        "seed": 1
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 1
+      },
+      "pair": {
+        "a": "E3s0",
+        "b": "E3s1",
+        "mask": "E3s0",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -3,
+        2,
+        1
+      ]
+    },
+    {
+      "id": "rnd_E3s0_vs_E3s1_r2",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s0",
+        "eligible_from": "E3s1",
+        "deficits": [
+          -3,
+          2,
+          1
+        ],
+        "seed": 2
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 2
+      },
+      "pair": {
+        "a": "E3s0",
+        "b": "E3s1",
+        "mask": "E3s0",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -3,
+        2,
+        1
+      ]
+    },
+    {
+      "id": "rnd_E3s1_vs_E3s0_r0",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s1",
+        "eligible_from": "E3s0",
+        "deficits": [
+          3,
+          -2,
+          -1
+        ],
+        "seed": 0
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 0
+      },
+      "pair": {
+        "a": "E3s1",
+        "b": "E3s0",
+        "mask": "E3s1",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        3,
+        -2,
+        -1
+      ]
+    },
+    {
+      "id": "rnd_E3s1_vs_E3s0_r1",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s1",
+        "eligible_from": "E3s0",
+        "deficits": [
+          3,
+          -2,
+          -1
+        ],
+        "seed": 1
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 1
+      },
+      "pair": {
+        "a": "E3s1",
+        "b": "E3s0",
+        "mask": "E3s1",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        3,
+        -2,
+        -1
+      ]
+    },
+    {
+      "id": "rnd_E3s1_vs_E3s0_r2",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s1",
+        "eligible_from": "E3s0",
+        "deficits": [
+          3,
+          -2,
+          -1
+        ],
+        "seed": 2
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 2
+      },
+      "pair": {
+        "a": "E3s1",
+        "b": "E3s0",
+        "mask": "E3s1",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        3,
+        -2,
+        -1
+      ]
+    },
+    {
+      "id": "rnd_E3s0_vs_E3s2_r0",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s0",
+        "eligible_from": "E3s2",
+        "deficits": [
+          1,
+          7,
+          4
+        ],
+        "seed": 0
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 0
+      },
+      "pair": {
+        "a": "E3s0",
+        "b": "E3s2",
+        "mask": "E3s0",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        1,
+        7,
+        4
+      ]
+    },
+    {
+      "id": "rnd_E3s0_vs_E3s2_r1",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s0",
+        "eligible_from": "E3s2",
+        "deficits": [
+          1,
+          7,
+          4
+        ],
+        "seed": 1
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 1
+      },
+      "pair": {
+        "a": "E3s0",
+        "b": "E3s2",
+        "mask": "E3s0",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        1,
+        7,
+        4
+      ]
+    },
+    {
+      "id": "rnd_E3s0_vs_E3s2_r2",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s0",
+        "eligible_from": "E3s2",
+        "deficits": [
+          1,
+          7,
+          4
+        ],
+        "seed": 2
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 2
+      },
+      "pair": {
+        "a": "E3s0",
+        "b": "E3s2",
+        "mask": "E3s0",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        1,
+        7,
+        4
+      ]
+    },
+    {
+      "id": "rnd_E3s2_vs_E3s0_r0",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s2",
+        "eligible_from": "E3s0",
+        "deficits": [
+          -1,
+          -7,
+          -4
+        ],
+        "seed": 0
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 0
+      },
+      "pair": {
+        "a": "E3s2",
+        "b": "E3s0",
+        "mask": "E3s2",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -1,
+        -7,
+        -4
+      ]
+    },
+    {
+      "id": "rnd_E3s2_vs_E3s0_r1",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s2",
+        "eligible_from": "E3s0",
+        "deficits": [
+          -1,
+          -7,
+          -4
+        ],
+        "seed": 1
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 1
+      },
+      "pair": {
+        "a": "E3s2",
+        "b": "E3s0",
+        "mask": "E3s2",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -1,
+        -7,
+        -4
+      ]
+    },
+    {
+      "id": "rnd_E3s2_vs_E3s0_r2",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s2",
+        "eligible_from": "E3s0",
+        "deficits": [
+          -1,
+          -7,
+          -4
+        ],
+        "seed": 2
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 2
+      },
+      "pair": {
+        "a": "E3s2",
+        "b": "E3s0",
+        "mask": "E3s2",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -1,
+        -7,
+        -4
+      ]
+    },
+    {
+      "id": "rnd_E3s1_vs_E3s2_r0",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s1",
+        "eligible_from": "E3s2",
+        "deficits": [
+          -2,
+          5,
+          0
+        ],
+        "seed": 0
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 0
+      },
+      "pair": {
+        "a": "E3s1",
+        "b": "E3s2",
+        "mask": "E3s1",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -2,
+        5,
+        0
+      ]
+    },
+    {
+      "id": "rnd_E3s1_vs_E3s2_r1",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s1",
+        "eligible_from": "E3s2",
+        "deficits": [
+          -2,
+          5,
+          0
+        ],
+        "seed": 1
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 1
+      },
+      "pair": {
+        "a": "E3s1",
+        "b": "E3s2",
+        "mask": "E3s1",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -2,
+        5,
+        0
+      ]
+    },
+    {
+      "id": "rnd_E3s1_vs_E3s2_r2",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s1",
+        "eligible_from": "E3s2",
+        "deficits": [
+          -2,
+          5,
+          0
+        ],
+        "seed": 2
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 2
+      },
+      "pair": {
+        "a": "E3s1",
+        "b": "E3s2",
+        "mask": "E3s1",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -2,
+        5,
+        0
+      ]
+    },
+    {
+      "id": "rnd_E3s2_vs_E3s1_r0",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s2",
+        "eligible_from": "E3s1",
+        "deficits": [
+          2,
+          -5,
+          0
+        ],
+        "seed": 0
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 0
+      },
+      "pair": {
+        "a": "E3s2",
+        "b": "E3s1",
+        "mask": "E3s2",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        2,
+        -5,
+        0
+      ]
+    },
+    {
+      "id": "rnd_E3s2_vs_E3s1_r1",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s2",
+        "eligible_from": "E3s1",
+        "deficits": [
+          2,
+          -5,
+          0
+        ],
+        "seed": 1
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 1
+      },
+      "pair": {
+        "a": "E3s2",
+        "b": "E3s1",
+        "mask": "E3s2",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        2,
+        -5,
+        0
+      ]
+    },
+    {
+      "id": "rnd_E3s2_vs_E3s1_r2",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "E3s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "E3s2",
+        "eligible_from": "E3s1",
+        "deficits": [
+          2,
+          -5,
+          0
+        ],
+        "seed": 2
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 2
+      },
+      "pair": {
+        "a": "E3s2",
+        "b": "E3s1",
+        "mask": "E3s2",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        2,
+        -5,
+        0
+      ]
+    },
+    {
+      "id": "rnd_J12s0_vs_J12s2_r0",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "J12s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "J12s0",
+        "eligible_from": "J12s2",
+        "deficits": [
+          -2,
+          2,
+          -3
+        ],
+        "seed": 0
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 0
+      },
+      "pair": {
+        "a": "J12s0",
+        "b": "J12s2",
+        "mask": "J12s0",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -2,
+        2,
+        -3
+      ]
+    },
+    {
+      "id": "rnd_J12s0_vs_J12s2_r1",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "J12s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "J12s0",
+        "eligible_from": "J12s2",
+        "deficits": [
+          -2,
+          2,
+          -3
+        ],
+        "seed": 1
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 1
+      },
+      "pair": {
+        "a": "J12s0",
+        "b": "J12s2",
+        "mask": "J12s0",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -2,
+        2,
+        -3
+      ]
+    },
+    {
+      "id": "rnd_J12s0_vs_J12s2_r2",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "J12s0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "J12s0",
+        "eligible_from": "J12s2",
+        "deficits": [
+          -2,
+          2,
+          -3
+        ],
+        "seed": 2
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 2
+      },
+      "pair": {
+        "a": "J12s0",
+        "b": "J12s2",
+        "mask": "J12s0",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -2,
+        2,
+        -3
+      ]
+    },
+    {
+      "id": "rnd_J12s2_vs_J12s0_r0",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "J12s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "J12s2",
+        "eligible_from": "J12s0",
+        "deficits": [
+          2,
+          -2,
+          3
+        ],
+        "seed": 0
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 0
+      },
+      "pair": {
+        "a": "J12s2",
+        "b": "J12s0",
+        "mask": "J12s2",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        2,
+        -2,
+        3
+      ]
+    },
+    {
+      "id": "rnd_J12s2_vs_J12s0_r1",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "J12s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "J12s2",
+        "eligible_from": "J12s0",
+        "deficits": [
+          2,
+          -2,
+          3
+        ],
+        "seed": 1
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 1
+      },
+      "pair": {
+        "a": "J12s2",
+        "b": "J12s0",
+        "mask": "J12s2",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        2,
+        -2,
+        3
+      ]
+    },
+    {
+      "id": "rnd_J12s2_vs_J12s0_r2",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "J12s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "J12s2",
+        "eligible_from": "J12s0",
+        "deficits": [
+          2,
+          -2,
+          3
+        ],
+        "seed": 2
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 2
+      },
+      "pair": {
+        "a": "J12s2",
+        "b": "J12s0",
+        "mask": "J12s2",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        2,
+        -2,
+        3
+      ]
+    },
+    {
+      "id": "rnd_J12s1_vs_J12s2_r0",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "J12s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "J12s1",
+        "eligible_from": "J12s2",
+        "deficits": [
+          -1,
+          0,
+          -2
+        ],
+        "seed": 0
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 0
+      },
+      "pair": {
+        "a": "J12s1",
+        "b": "J12s2",
+        "mask": "J12s1",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -1,
+        0,
+        -2
+      ]
+    },
+    {
+      "id": "rnd_J12s1_vs_J12s2_r1",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "J12s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "J12s1",
+        "eligible_from": "J12s2",
+        "deficits": [
+          -1,
+          0,
+          -2
+        ],
+        "seed": 1
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 1
+      },
+      "pair": {
+        "a": "J12s1",
+        "b": "J12s2",
+        "mask": "J12s1",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -1,
+        0,
+        -2
+      ]
+    },
+    {
+      "id": "rnd_J12s1_vs_J12s2_r2",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "J12s1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "J12s1",
+        "eligible_from": "J12s2",
+        "deficits": [
+          -1,
+          0,
+          -2
+        ],
+        "seed": 2
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 2
+      },
+      "pair": {
+        "a": "J12s1",
+        "b": "J12s2",
+        "mask": "J12s1",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        -1,
+        0,
+        -2
+      ]
+    },
+    {
+      "id": "rnd_J12s2_vs_J12s1_r0",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "J12s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "J12s2",
+        "eligible_from": "J12s1",
+        "deficits": [
+          1,
+          0,
+          2
+        ],
+        "seed": 0
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 0
+      },
+      "pair": {
+        "a": "J12s2",
+        "b": "J12s1",
+        "mask": "J12s2",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        1,
+        0,
+        2
+      ]
+    },
+    {
+      "id": "rnd_J12s2_vs_J12s1_r1",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "J12s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "J12s2",
+        "eligible_from": "J12s1",
+        "deficits": [
+          1,
+          0,
+          2
+        ],
+        "seed": 1
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 1
+      },
+      "pair": {
+        "a": "J12s2",
+        "b": "J12s1",
+        "mask": "J12s2",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        1,
+        0,
+        2
+      ]
+    },
+    {
+      "id": "rnd_J12s2_vs_J12s1_r2",
+      "tier": "B-ctrl",
+      "rq": "RQ3",
+      "purpose": "null control: deficit-matched random shared-gene fill",
+      "mask": {
+        "source": "J12s2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "rule": "random_fill",
+        "source": "J12s2",
+        "eligible_from": "J12s1",
+        "deficits": [
+          1,
+          0,
+          2
+        ],
+        "seed": 2
+      },
+      "repair": {
+        "scope": "exclusive",
+        "seed": 2
+      },
+      "pair": {
+        "a": "J12s2",
+        "b": "J12s1",
+        "mask": "J12s2",
+        "bits": "random",
+        "fill": "random"
+      },
+      "static_deficits": [
+        1,
+        0,
+        2
+      ]
+    },
+    {
       "id": "h25_late_layer_nu",
       "tier": "C",
       "rq": "RQ1",
