@@ -1,20 +1,30 @@
 # Exact-budget replay summary
 
-Completed jobs: 97 of 97.
+Completed jobs: 127 of 127.
 
 ## RQ3: interaction contrasts (lower metric is better; I = -(delta_A + delta_B))
 
 | A | B | fill | tier | W2 NLL I | delta_A | delta_B | C4 NLL I | repair genes (max) | repair range W2 |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | E3s0 | E3s1 | owner | B | -0.0085 | +0.0032 | +0.0053 | -0.0069 | 3.0 | +0.0017 |
+| E3s0 | E3s1 | random | B-ctrl |  |  |  |  | 3.0 |  |
 | E3s0 | E3s2 | owner | B | -0.0479 | +0.0078 | +0.0401 | -0.0271 | 6.0 | +0.0074 |
+| E3s0 | E3s2 | random | B-ctrl |  |  |  |  | 6.0 |  |
 | E3s1 | DWs0 | donor | A | -0.0363 | +0.0079 | +0.0284 | -0.0191 | 1.0 | +0.0025 |
 | E3s1 | DWs0 | owner | A | -0.0138 | +0.0079 | +0.0059 | +0.0074 | 0.0 | +0.0000 |
+| E3s1 | E3s0 | random | B-ctrl |  |  |  |  | 3.0 |  |
 | E3s1 | E3s2 | owner | B | -0.0241 | +0.0079 | +0.0162 | -0.0112 | 3.0 | +0.0101 |
+| E3s1 | E3s2 | random | B-ctrl |  |  |  |  | 3.0 |  |
+| E3s2 | E3s0 | random | B-ctrl |  |  |  |  | 6.0 |  |
+| E3s2 | E3s1 | random | B-ctrl |  |  |  |  | 3.0 |  |
 | J12s0 | J12s1 | donor | A | -0.0185 | +0.0513 | -0.0328 | -0.0431 | 4.0 | +0.0534 |
 | J12s0 | J12s1 | owner | A | +0.0059 | +0.0447 | -0.0505 | -0.0040 | 0.0 | +0.0000 |
 | J12s0 | J12s2 | owner | B | -0.0194 | +0.0131 | +0.0063 | -0.0097 | 4.0 | +0.0041 |
+| J12s0 | J12s2 | random | B-ctrl |  |  |  |  | 4.0 |  |
 | J12s1 | J12s2 | owner | B | -0.0301 | -0.0407 | +0.0707 | -0.0165 | 2.0 | +0.0012 |
+| J12s1 | J12s2 | random | B-ctrl |  |  |  |  | 2.0 |  |
+| J12s2 | J12s0 | random | B-ctrl |  |  |  |  | 3.0 |  |
+| J12s2 | J12s1 | random | B-ctrl |  |  |  |  | 2.0 |  |
 
 ## RQ1 baselines and references
 
