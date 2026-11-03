@@ -566,9 +566,31 @@ def build_replay_bits(
         if spec["rule"] == "random_fill":
             owner = sources[spec["source"]]
             other = sources[spec["eligible_from"]]
+            # The target deficit is computed fresh from `groups` here, exactly
+            # as the real shared-gene exchange (the non-"rule" branch below)
+            # computes its own deficit -- never passed in statically. A size
+            # group's INDEX is not a stable identity across call sites:
+            # size_groups(mistral_module_sizes()) (used at planning time) and
+            # quant_groups(model, quant_db, "size") (used here at replay time)
+            # group the same modules by the same sizes but in a different
+            # list order ([kv, qo, mlp] vs [mlp, kv, qo] for Mistral-7B). An
+            # earlier version baked a deficit list computed with the former
+            # into the job spec at planning time, then zipped it against
+            # `groups` in the latter order here -- misassigning every
+            # group's target to a different group's capacity. That silently
+            # "worked" (by capacity coincidence) for most directions and hit
+            # a genuine CompressionBudgetError for others. Recomputing here,
+            # against whatever `groups` this call was actually given, is not
+            # just a fix but the invariant to keep: this function must never
+            # again consume a group-indexed quantity computed by a different
+            # caller against a possibly different group order.
+            deficits = level_deficits(
+                groups, fill_bits(owner, other, mask_drop, groups, "owner"),
+                mask_drop, reference_bitwidth, mu,
+            )
             bits = random_fill_bits(
                 owner, other["drop"], mask_drop, groups,
-                spec["deficits"], int(spec.get("seed", 0)),
+                deficits, int(spec.get("seed", 0)),
                 levels=spec.get("levels", (2, 3, 4, 5, 6)),
             )
             eligibility = eligibility_drop_state(mask_drop, other["drop"]) if scope == "exclusive" else None

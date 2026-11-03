@@ -209,25 +209,64 @@ class ExactReplayPureTest(unittest.TestCase):
     def test_random_fill_round_trips_through_build_replay_bits(self):
         # Same (mask, repair-scope) contract as a real Tier B job: build_replay_bits
         # must hand back bits plus the identical eligibility mask that a real
-        # x_owner_exclusive_{a}_Q{b} job would use.
+        # x_owner_exclusive_{a}_Q{b} job would use. The job spec carries no
+        # "deficits" field at all -- build_replay_bits must compute it itself
+        # from the sources, against whatever `groups` it is called with.
         a, b = self.sources["E3s1"], self.sources["E3s2"]
-        deficits = er.level_deficits(
-            self.groups, er.fill_bits(a, b, a["drop"], self.groups, "owner"), a["drop"]
-        )
         job_entry = {
             "mask": {"source": "E3s1"},
-            "bits": {"rule": "random_fill", "source": "E3s1", "eligible_from": "E3s2",
-                     "deficits": deficits, "seed": 2},
+            "bits": {"rule": "random_fill", "source": "E3s1", "eligible_from": "E3s2", "seed": 2},
             "repair": {"scope": "exclusive", "seed": 2},
         }
         bits, eligibility = er.build_replay_bits(job_entry, a["drop"], self.sources, self.groups)
         expected_elig = er.eligibility_drop_state(a["drop"], b["drop"])
         self.assertEqual(eligibility, expected_elig)
-        direct = er.random_fill_bits(a, b["drop"], a["drop"], self.groups, deficits, seed=2)
+        real_deficits = er.level_deficits(
+            self.groups, er.fill_bits(a, b, a["drop"], self.groups, "owner"), a["drop"]
+        )
+        direct = er.random_fill_bits(a, b["drop"], a["drop"], self.groups, real_deficits, seed=2)
         self.assertEqual(bits, direct)
-        # And build_replay_bits's result must be the exact real deficit, not
+        # build_replay_bits's result must be the exact real deficit, not
         # merely "some" deficit -- this is what makes it a matched control.
-        self.assertEqual(er.level_deficits(self.groups, bits, a["drop"]), deficits)
+        self.assertEqual(er.level_deficits(self.groups, bits, a["drop"]), real_deficits)
+
+    def test_random_fill_is_robust_to_group_order_mismatch(self):
+        # Regression test for the actual bug found running on DataLab: an
+        # earlier version of build_replay_bits's "random_fill" rule took a
+        # deficit list computed by the CALLER (at planning time, using
+        # size_groups(mistral_module_sizes())'s order) and zipped it against
+        # whatever `groups` it was handed here. size_groups() and the replay
+        # runner's own quant_groups(model, quant_db, "size") group the same
+        # modules by the same sizes but in a DIFFERENT list order ([kv, qo,
+        # mlp] vs [mlp, kv, qo] for Mistral-7B) -- so a deficit computed
+        # against one order and applied against the other silently
+        # misassigns every group's target to a different group's capacity.
+        # That "worked" for some (mask, other) pairs by capacity coincidence
+        # and hit a genuine CompressionBudgetError for others once it
+        # actually ran. build_replay_bits must compute the deficit itself,
+        # fresh, against the `groups` it was actually called with -- so it
+        # must give the identical, correct result under ANY consistent
+        # permutation of `groups`, never just the planning-time one.
+        a, b = self.sources["J12s0"], self.sources["J12s2"]
+        job_entry = {
+            "mask": {"source": "J12s0"},
+            "bits": {"rule": "random_fill", "source": "J12s0", "eligible_from": "J12s2", "seed": 1},
+            "repair": {"scope": "exclusive", "seed": 1},
+        }
+        permuted = [self.groups[2], self.groups[0], self.groups[1]]  # [mlp, kv, qo]
+
+        # Not checked: identical bits under both orders. Processing groups in
+        # a different order feeds the same seeded rng a different sequence of
+        # choice() calls, so the exact genes touched can legitimately differ
+        # -- only which deficit lands on which group (by identity) matters.
+        bits_permuted, _ = er.build_replay_bits(job_entry, a["drop"], self.sources, permuted)
+
+        real_deficits = er.level_deficits(
+            self.groups, er.fill_bits(a, b, a["drop"], self.groups, "owner"), a["drop"]
+        )
+        self.assertEqual(er.level_deficits(self.groups, bits_permuted, a["drop"]), real_deficits)
+        self.assertEqual(er.level_deficits(permuted, bits_permuted, a["drop"]),
+                         [real_deficits[2], real_deficits[0], real_deficits[1]])
 
     def test_planner_adds_matched_bctrl_jobs_for_every_tier_b_pair(self):
         # Tier B's own `pair` field only records the canonical (a, b) order a

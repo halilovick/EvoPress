@@ -1610,11 +1610,6 @@
         "rule": "random_fill",
         "source": "E3s0",
         "eligible_from": "E3s1",
-        "deficits": [
-          -3,
-          2,
-          1
-        ],
         "seed": 0
       },
       "repair": {
@@ -1647,11 +1642,6 @@
         "rule": "random_fill",
         "source": "E3s0",
         "eligible_from": "E3s1",
-        "deficits": [
-          -3,
-          2,
-          1
-        ],
         "seed": 1
       },
       "repair": {
@@ -1684,11 +1674,6 @@
         "rule": "random_fill",
         "source": "E3s0",
         "eligible_from": "E3s1",
-        "deficits": [
-          -3,
-          2,
-          1
-        ],
         "seed": 2
       },
       "repair": {
@@ -1721,11 +1706,6 @@
         "rule": "random_fill",
         "source": "E3s1",
         "eligible_from": "E3s0",
-        "deficits": [
-          3,
-          -2,
-          -1
-        ],
         "seed": 0
       },
       "repair": {
@@ -1758,11 +1738,6 @@
         "rule": "random_fill",
         "source": "E3s1",
         "eligible_from": "E3s0",
-        "deficits": [
-          3,
-          -2,
-          -1
-        ],
         "seed": 1
       },
       "repair": {
@@ -1795,11 +1770,6 @@
         "rule": "random_fill",
         "source": "E3s1",
         "eligible_from": "E3s0",
-        "deficits": [
-          3,
-          -2,
-          -1
-        ],
         "seed": 2
       },
       "repair": {
@@ -1832,11 +1802,6 @@
         "rule": "random_fill",
         "source": "E3s0",
         "eligible_from": "E3s2",
-        "deficits": [
-          1,
-          7,
-          4
-        ],
         "seed": 0
       },
       "repair": {
@@ -1869,11 +1834,6 @@
         "rule": "random_fill",
         "source": "E3s0",
         "eligible_from": "E3s2",
-        "deficits": [
-          1,
-          7,
-          4
-        ],
         "seed": 1
       },
       "repair": {
@@ -1906,11 +1866,6 @@
         "rule": "random_fill",
         "source": "E3s0",
         "eligible_from": "E3s2",
-        "deficits": [
-          1,
-          7,
-          4
-        ],
         "seed": 2
       },
       "repair": {
@@ -1943,11 +1898,6 @@
         "rule": "random_fill",
         "source": "E3s2",
         "eligible_from": "E3s0",
-        "deficits": [
-          -1,
-          -7,
-          -4
-        ],
         "seed": 0
       },
       "repair": {
@@ -1980,11 +1930,6 @@
         "rule": "random_fill",
         "source": "E3s2",
         "eligible_from": "E3s0",
-        "deficits": [
-          -1,
-          -7,
-          -4
-        ],
         "seed": 1
       },
       "repair": {
@@ -2017,11 +1962,6 @@
         "rule": "random_fill",
         "source": "E3s2",
         "eligible_from": "E3s0",
-        "deficits": [
-          -1,
-          -7,
-          -4
-        ],
         "seed": 2
       },
       "repair": {
@@ -2054,11 +1994,6 @@
         "rule": "random_fill",
         "source": "E3s1",
         "eligible_from": "E3s2",
-        "deficits": [
-          -2,
-          5,
-          0
-        ],
         "seed": 0
       },
       "repair": {
@@ -2091,11 +2026,6 @@
         "rule": "random_fill",
         "source": "E3s1",
         "eligible_from": "E3s2",
-        "deficits": [
-          -2,
-          5,
-          0
-        ],
         "seed": 1
       },
       "repair": {
@@ -2128,11 +2058,6 @@
         "rule": "random_fill",
         "source": "E3s1",
         "eligible_from": "E3s2",
-        "deficits": [
-          -2,
-          5,
-          0
-        ],
         "seed": 2
       },
       "repair": {
@@ -2165,11 +2090,6 @@
         "rule": "random_fill",
         "source": "E3s2",
         "eligible_from": "E3s1",
-        "deficits": [
-          2,
-          -5,
-          0
-        ],
         "seed": 0
       },
       "repair": {
@@ -2202,11 +2122,6 @@
         "rule": "random_fill",
         "source": "E3s2",
         "eligible_from": "E3s1",
-        "deficits": [
-          2,
-          -5,
-          0
-        ],
         "seed": 1
       },
       "repair": {
@@ -2239,11 +2154,6 @@
         "rule": "random_fill",
         "source": "E3s2",
         "eligible_from": "E3s1",
-        "deficits": [
-          2,
-          -5,
-          0
-        ],
         "seed": 2
       },
       "repair": {
@@ -2276,11 +2186,6 @@
         "rule": "random_fill",
         "source": "J12s0",
         "eligible_from": "J12s2",
-        "deficits": [
-          -2,
-          2,
-          -3
-        ],
         "seed": 0
       },
       "repair": {
@@ -2313,11 +2218,6 @@
         "rule": "random_fill",
         "source": "J12s0",
         "eligible_from": "J12s2",
-        "deficits": [
-          -2,
-          2,
-          -3
-        ],
         "seed": 1
       },
       "repair": {
@@ -2350,11 +2250,6 @@
         "rule": "random_fill",
         "source": "J12s0",
         "eligible_from": "J12s2",
-        "deficits": [
-          -2,
-          2,
-          -3
-        ],
         "seed": 2
       },
       "repair": {
@@ -2387,11 +2282,6 @@
         "rule": "random_fill",
         "source": "J12s2",
         "eligible_from": "J12s0",
-        "deficits": [
-          2,
-          -2,
-          3
-        ],
         "seed": 0
       },
       "repair": {
@@ -2424,11 +2314,6 @@
         "rule": "random_fill",
         "source": "J12s2",
         "eligible_from": "J12s0",
-        "deficits": [
-          2,
-          -2,
-          3
-        ],
         "seed": 1
       },
       "repair": {
@@ -2461,11 +2346,6 @@
         "rule": "random_fill",
         "source": "J12s2",
         "eligible_from": "J12s0",
-        "deficits": [
-          2,
-          -2,
-          3
-        ],
         "seed": 2
       },
       "repair": {
@@ -2498,11 +2378,6 @@
         "rule": "random_fill",
         "source": "J12s1",
         "eligible_from": "J12s2",
-        "deficits": [
-          -1,
-          0,
-          -2
-        ],
         "seed": 0
       },
       "repair": {
@@ -2535,11 +2410,6 @@
         "rule": "random_fill",
         "source": "J12s1",
         "eligible_from": "J12s2",
-        "deficits": [
-          -1,
-          0,
-          -2
-        ],
         "seed": 1
       },
       "repair": {
@@ -2572,11 +2442,6 @@
         "rule": "random_fill",
         "source": "J12s1",
         "eligible_from": "J12s2",
-        "deficits": [
-          -1,
-          0,
-          -2
-        ],
         "seed": 2
       },
       "repair": {
@@ -2609,11 +2474,6 @@
         "rule": "random_fill",
         "source": "J12s2",
         "eligible_from": "J12s1",
-        "deficits": [
-          1,
-          0,
-          2
-        ],
         "seed": 0
       },
       "repair": {
@@ -2646,11 +2506,6 @@
         "rule": "random_fill",
         "source": "J12s2",
         "eligible_from": "J12s1",
-        "deficits": [
-          1,
-          0,
-          2
-        ],
         "seed": 1
       },
       "repair": {
@@ -2683,11 +2538,6 @@
         "rule": "random_fill",
         "source": "J12s2",
         "eligible_from": "J12s1",
-        "deficits": [
-          1,
-          0,
-          2
-        ],
         "seed": 2
       },
       "repair": {
