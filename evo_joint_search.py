@@ -1553,6 +1553,22 @@ def parse_args(argv=None):
         help="Keep the target bit average over projections still active after depth pruning.",
     )
     parser.add_argument(
+        "--active_only_quant_mutation",
+        action="store_true",
+        help=(
+            "Restrict the standard mutation's quantization-child level exchange to "
+            "currently-active (non-dropped) projections, even under the exact "
+            "total-model budget (--compression_budget_mode "
+            "match_uniform_quantization_total), where this would otherwise be "
+            "None (drawing from inactive projections too, so ~6%% of quantization "
+            "children at s=0.25 are silent no-ops; see offspring_gene_changes.md). "
+            "Ablation flag: independent of --active_quant_budget, which is "
+            "incompatible with the exact total-model budget. Does not affect the "
+            "interaction-aware or sequential-frozen mutation paths, which already "
+            "restrict to active genes under the exact budget."
+        ),
+    )
+    parser.add_argument(
         "--joint_mutation_mode",
         "--joint-mutation-mode",
         default="standard",
@@ -2438,6 +2454,7 @@ def main():
         "compression_budget_mode": args.compression_budget_mode,
         "quantization_group_size": args.quantization_group_size,
         "active_quant_budget": bool(args.active_quant_budget),
+        "active_only_quant_mutation": bool(args.active_only_quant_mutation),
         "joint_mutation_mode": args.joint_mutation_mode,
         "joint_aware_mutation": bool(args.joint_aware_mutation),
         "joint_aware_probability": float(args.joint_aware_probability),
@@ -3010,7 +3027,10 @@ def main():
                             args.step_size,
                             (
                                 offspring["drop"]
-                                if args.active_quant_budget
+                                if (
+                                    args.active_quant_budget
+                                    or args.active_only_quant_mutation
+                                )
                                 else None
                             ),
                         )
@@ -3783,6 +3803,7 @@ def main():
             "zero_point_bits": args.budget_zero_point_bits,
             "database_module_count": database_audit["module_count"],
             "active_quant_budget": args.active_quant_budget,
+            "active_only_quant_mutation": args.active_only_quant_mutation,
             "joint_mutation_mode": args.joint_mutation_mode,
             "joint_aware_mutation": args.joint_aware_mutation,
             "joint_aware_probability": (
