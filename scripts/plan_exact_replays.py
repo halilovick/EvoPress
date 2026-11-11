@@ -249,6 +249,39 @@ def build_plan(sources, groups, analysis, include_125: bool) -> dict[str, Any]:
         jobs += random_fill_jobs(a, b, "B-ctrl", "null control: deficit-matched random shared-gene fill")
         jobs += random_fill_jobs(b, a, "B-ctrl", "null control: deficit-matched random shared-gene fill")
 
+    # Tier B2: RQ3 extension. Tier B only ever covered same-algorithm seed
+    # pairs (E3 x E3, J12 x J12) -- 5 repaired pairs total. pair_analysis()
+    # already computes shared-gene overlap and repair magnitude for every
+    # same-sparsity pair among all registered full-scale finals (48 pairs),
+    # but only 7 (2 repair-free + the 5 above) were ever actually evaluated.
+    # This tier samples 7 of the remaining 41 cross-variant pairs, chosen to
+    # spread across the full observed range of Jaccard overlap (0.45-0.78)
+    # and owner_abs_levels repair magnitude (4-32), to turn the Tier B
+    # "mostly independent, one exception" finding into a dose-response
+    # relationship instead of a handful of anecdotal points.
+    b2_pairs = (
+        ("E3s0", "LXs0"),   # jaccard 0.52, owner_abs_levels 4  (near repair-free)
+        ("IAs0", "LXs0"),   # jaccard 0.78, owner_abs_levels 6  (high overlap, low repair)
+        ("E3s2", "IAs0"),   # jaccard 0.45, owner_abs_levels 6  (low overlap, low repair)
+        ("IAs0", "IAs1"),   # jaccard 0.60, owner_abs_levels 10 (mid)
+        ("E3s1", "P4s1"),   # jaccard 0.60, owner_abs_levels 14 (mid)
+        ("IAs0", "DWs0"),   # jaccard 0.45, owner_abs_levels 22 (low overlap, high repair)
+        ("E3s0", "IAs2"),   # jaccard 0.52, owner_abs_levels 32 (highest repair magnitude)
+    )
+    for a, b in b2_pairs:
+        r = by_pair[(a, b)]
+        if r["owner_repair_free_pair"]:
+            continue
+        jobs += crossed_jobs(a, b, "owner", "exclusive", "B2", "shared-gene exchange, cross-variant overlap/repair sweep",
+                             r["owner_deficits_DA_QB"], r["owner_deficits_DB_QA"])
+    # Tier B2-ctrl: null control for Tier B2, same construction as Tier B-ctrl.
+    for a, b in b2_pairs:
+        r = by_pair[(a, b)]
+        if r["owner_repair_free_pair"]:
+            continue
+        jobs += random_fill_jobs(a, b, "B2-ctrl", "null control: deficit-matched random shared-gene fill")
+        jobs += random_fill_jobs(b, a, "B2-ctrl", "null control: deficit-matched random shared-gene fill")
+
     # Tier C: RQ1 baselines under the exact budget.
     for sparsity, k in ((0.25, 8), (0.125, 4)):
         tag = "25" if sparsity == 0.25 else "12"
