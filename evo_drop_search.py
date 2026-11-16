@@ -51,6 +51,7 @@ from src.model_utils import (
     restore_forward,
 )
 from src.metrics import compute_perplexity, compute_kl_div
+from src.teacher_logits_cache import DiskTensorCache
 from src.run_reporting import (
     RunReporter,
     build_depth_details,
@@ -295,6 +296,15 @@ def parse_args():
     )
     parser.add_argument("--use_fast_tokenizer", action="store_true", help="Whether to use fast tokenizer.")
     parser.add_argument("--seed", default=0, type=int, help="Random seed.")
+    parser.add_argument(
+        "--disk_teacher_logits",
+        action="store_true",
+        help=(
+            "Keep the dense-teacher logits in a disk-backed cache instead of CPU memory "
+            "(needed for 524,288 calibration tokens under a 16 GiB memory limit). "
+            "Same cache as evo_joint_search.py; the KL values are unchanged."
+        ),
+    )
     # Save params
     parser.add_argument("--save_dir", type=str, help="Where to save sparse model.")
     parser.add_argument("--drop_config_dir", type=str, help="Where to save layer drop config.")
@@ -377,10 +387,14 @@ def main():
     # during the search, each candidate is compared to these via KL divergence!
     target_logits = []
     if args.fitness_fn == "kl":
+        if args.disk_teacher_logits:
+            target_logits = DiskTensorCache.temporary(prefix="evopress-depth-teacher-logits")
+            print(f"Dense teacher logits cache: {target_logits.root}")
         # Compute target logits (calibration)
         for i in trange(0, len(calibration_data), desc="Computing target logits (calib)", leave=False):
             with torch.no_grad():
-                target_logits.append(model(calibration_data[i].to(device)).logits.cpu())
+                logits = model(calibration_data[i].to(device)).logits
+                target_logits.append(logits if args.disk_teacher_logits else logits.cpu())
 
     layers = get_layers(model)
     attention_module_names = [
