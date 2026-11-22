@@ -83,6 +83,50 @@ def build_plan(root: Path, labels: list[str]) -> dict[str, Any]:
     }
 
 
+SEQ = "thesis_results/datalab_raw/fullspace_extensions"
+SEQUENTIAL_CANDIDATES = {
+    # Structure-first sequential search, mask from the screening depth-only search.
+    **{f"SFs{s}": f"{SEQ}/fullspace_depthfrozen_g150_seed{s}/final_candidate.json" for s in range(3)},
+    # Effort-matched two-stage search: protocol-F depth-only G50, then frozen bits G100.
+    **{f"MSs{s}": f"{SEQ}/fullspace_matchedseq_d50_q100/frozen_q100_seed{s}/final_candidate.json" for s in range(3)},
+}
+
+
+def build_sequential_plan(root: Path) -> dict[str, Any]:
+    """The six sequential (frozen-mask) final models, exactly as stored.
+
+    Same job form as the ``own_*`` jobs of the default plan; the dense and
+    uniform references were already evaluated and are not repeated.
+    """
+    groups = size_groups(mistral_module_sizes())
+    sources: dict[str, dict[str, Any]] = {}
+    jobs = []
+    for label, rel in SEQUENTIAL_CANDIDATES.items():
+        path = root / rel
+        if not path.is_file():
+            raise FileNotFoundError(f"Missing candidate {label}: {path}")
+        cand = load_final_candidate(path)
+        cand["source"] = rel
+        sources[label] = cand
+        entry = job(f"own_{label}", "L", "RQ1", "sequential final candidate, as stored",
+                    {"source": label}, {"source": label, "fill": "donor"}, {"scope": "none", "seed": 0})
+        bits, _ = build_replay_bits(entry, cand["drop"], sources, groups)
+        deficits = level_deficits(groups, bits, cand["drop"])
+        if any(deficits):
+            raise ValueError(f"Job {entry['id']} violates the exact budget (deficits {deficits}).")
+        entry["static_deficits"] = deficits
+        entry["removed"] = [sum(cand["drop"]["attn"]), sum(cand["drop"]["mlp"])]
+        jobs.append(entry)
+    return {
+        "version": 1,
+        "purpose": "zero-shot LM-eval of the sequential (frozen-mask) final models",
+        "reference_bitwidth": 3,
+        "levels": [2, 3, 4, 5, 6],
+        "sources": {label: cand["source"] for label, cand in sources.items()},
+        "jobs": jobs,
+    }
+
+
 REPLAY_PLAN_125 = "thesis_results/exact_replay_plan_125/replay_plan.json"
 INDEPENDENT_JOBS = [f"ind_DO12s{i}_QE2s{i}_shift" for i in range(3)] + [f"ind_DO25s{i}_QE2s{i}_shift" for i in range(3)]
 
@@ -129,11 +173,14 @@ def main(argv=None) -> None:
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--include_variants", action="store_true",
                         help="Also add the RQ2 variants (IA, DW, P4, LX); not part of the default 11 models.")
-    parser.add_argument("--set", default="fullspace", choices=["fullspace", "independent"],
-                        help="independent: the six independent compositions of the replay batches.")
+    parser.add_argument("--set", default="fullspace", choices=["fullspace", "independent", "sequential"],
+                        help="independent: the six independent compositions of the replay batches; "
+                             "sequential: the six frozen-mask sequential finals.")
     args = parser.parse_args(argv)
     if args.set == "independent":
         plan = build_independent_plan(Path(args.repo_root))
+    elif args.set == "sequential":
+        plan = build_sequential_plan(Path(args.repo_root))
     else:
         labels = list(DEFAULT_SOURCES) + (list(EXTRA_SOURCES) if args.include_variants else [])
         plan = build_plan(Path(args.repo_root), labels)
