@@ -14,7 +14,12 @@ Writes vector PDFs plus the CSV of plotted values to ``--output_dir``:
   for uniform 3-bit, quantization-only search and joint search at 12.5% and
   25% removal, with per-seed points and mean zero-shot accuracy;
 * ``rq2_search_variants.pdf``: final WikiText-2 perplexity per seed of the
-  standard joint search and the six search-design variants at 25% removal.
+  standard joint search and the six search-design variants at 25% removal;
+* ``backup_convergence.pdf``: WikiText-2 perplexity during the standard joint
+  search (E3, evaluated every 5 generations) with the generation of the last
+  accepted structural change per seed.
+
+Colors follow the TU Wien slide template (logo blue as the single accent).
 """
 
 from __future__ import annotations
@@ -55,8 +60,9 @@ RUNS = {
 LMEVAL_IDS = {"E1": ["own_uniform3"], "E2": [f"own_E2s{s}" for s in range(3)],
               "J12": [f"own_J12s{s}" for s in range(3)], "E3": [f"own_E3s{s}" for s in range(3)]}
 
-# Reference palette (dataviz skill): one accent hue, neutrals for everything else.
-BLUE = "#2a78d6"
+# One accent hue (TU Wien logo blue, as in the slide template), neutrals otherwise.
+BLUE = "#0070AF"
+BAND = "#d8e1f3"
 GRAY = "#b9b8b2"
 DARK_GRAY = "#52514e"
 INK = "#0b0b0b"
@@ -136,7 +142,7 @@ def rq2_figure(out: Path, table: list[dict]) -> None:
     ]
     ref = w2("E3")
     fig, ax = plt.subplots(figsize=(4.9, 2.7))
-    ax.axvspan(min(ref), max(ref), color="#eaf1fb", zorder=0, linewidth=0)
+    ax.axvspan(min(ref), max(ref), color=BAND, zorder=0, linewidth=0)
     for y, (lab, name) in enumerate(reversed(rows)):
         vals = w2(lab)
         mean = statistics.mean(vals)
@@ -166,6 +172,56 @@ def rq2_figure(out: Path, table: list[dict]) -> None:
     plt.close(fig)
 
 
+E3_LOGS = {
+    0: [f"{PM}/joint/joint_seed0_attempt1_20260831"],
+    1: [f"{PM}/joint/joint_seed1_attempt1_20260901", f"{PM}/joint/joint_seed1_attempt2_resume_20260901",
+        f"{PM}/joint/joint_seed1_attempt3_resume_20260902"],
+    2: [f"{PM}/joint/joint_seed2_attempt1_20260903"],
+}
+
+
+def convergence_figure(out: Path, table: list[dict]) -> None:
+    fig, ax = plt.subplots(figsize=(5.2, 2.6))
+    shades = {0: BLUE, 1: "#4f9ad0", 2: "#8bbbe0"}
+    labels: list[tuple[float, int]] = []
+    for seed, dirs in E3_LOGS.items():
+        rows = {}
+        for rel in dirs:
+            for row in csv.DictReader((REPO / rel / "generation_log.csv").open()):
+                rows[int(float(row["generation"]))] = row
+        points = [(g, float(r["wikitext2_ppl"])) for g, r in sorted(rows.items()) if r["wikitext2_ppl"]]
+        final = float(final_metrics(dirs[-1])["wikitext2_ppl"])
+        points.append((150, final))
+        depth = [g for g, r in sorted(rows.items()) if r["selected_parent_mutation_type"] == "depth"]
+        last_depth = max(depth)
+        xs, ys = zip(*points)
+        ax.plot(xs, ys, color=shades[seed], linewidth=1.6, zorder=3)
+        before = max((p for p in points if p[0] <= last_depth), key=lambda p: p[0])
+        after = min((p for p in points if p[0] >= last_depth), key=lambda p: p[0])
+        frac = 0.0 if after[0] == before[0] else (last_depth - before[0]) / (after[0] - before[0])
+        y_at = before[1] + frac * (after[1] - before[1])
+        ax.scatter([last_depth], [y_at], s=26, color=shades[seed], edgecolor="white", linewidth=1, zorder=4)
+        labels.append((final, seed))
+        table.append({"figure": "convergence", "label": f"E3s{seed}", "n_seeds": 1,
+                      "wikitext2_mean": f"{final:.3f}", "wikitext2_seeds": f"last structural change at generation {last_depth}"})
+    placed = -1.0
+    for final, seed in sorted(labels):
+        y = max(final, placed + 0.2)
+        ax.text(152, y, f"seed {seed}", va="center", fontsize=7, color=DARK_GRAY)
+        placed = y
+    ax.set_ylim(8.4, 12.5)
+    ax.set_xlim(0, 165)
+    ax.set_xlabel("Generation", fontsize=7.5, color=DARK_GRAY)
+    ax.set_ylabel("WikiText-2 perplexity", fontsize=7.5, color=DARK_GRAY)
+    ax.tick_params(labelsize=7.5)
+    style_axes(ax)
+    ax.text(70, 12.2, "dot = last accepted change of the mask", fontsize=7, color=DARK_GRAY, va="top")
+    fig.tight_layout()
+    fig.savefig(out / "backup_convergence.pdf")
+    fig.savefig(out / "backup_convergence.png", dpi=200)
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--output_dir", default=str(REPO / "thesis_results/presentation_figures"))
@@ -176,6 +232,7 @@ def main() -> None:
     table: list[dict] = []
     rq1_figure(out, table)
     rq2_figure(out, table)
+    convergence_figure(out, table)
     fields = ["figure", "label", "n_seeds", "wikitext2_mean", "wikitext2_seeds", "zero_shot_mean_pct"]
     with (out / "plotted_values.csv").open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fields)
