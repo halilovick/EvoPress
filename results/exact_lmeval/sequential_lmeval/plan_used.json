@@ -1,0 +1,184 @@
+{
+  "version": 1,
+  "purpose": "zero-shot LM-eval of the sequential (frozen-mask) final models",
+  "reference_bitwidth": 3,
+  "levels": [
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "sources": {
+    "SFs0": "thesis_results/datalab_raw/fullspace_extensions/fullspace_depthfrozen_g150_seed0/final_candidate.json",
+    "SFs1": "thesis_results/datalab_raw/fullspace_extensions/fullspace_depthfrozen_g150_seed1/final_candidate.json",
+    "SFs2": "thesis_results/datalab_raw/fullspace_extensions/fullspace_depthfrozen_g150_seed2/final_candidate.json",
+    "MSs0": "thesis_results/datalab_raw/fullspace_extensions/fullspace_matchedseq_d50_q100/frozen_q100_seed0/final_candidate.json",
+    "MSs1": "thesis_results/datalab_raw/fullspace_extensions/fullspace_matchedseq_d50_q100/frozen_q100_seed1/final_candidate.json",
+    "MSs2": "thesis_results/datalab_raw/fullspace_extensions/fullspace_matchedseq_d50_q100/frozen_q100_seed2/final_candidate.json"
+  },
+  "jobs": [
+    {
+      "id": "own_SFs0",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "sequential final candidate, as stored",
+      "mask": {
+        "source": "SFs0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "SFs0",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "own_SFs1",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "sequential final candidate, as stored",
+      "mask": {
+        "source": "SFs1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "SFs1",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "own_SFs2",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "sequential final candidate, as stored",
+      "mask": {
+        "source": "SFs2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "SFs2",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "own_MSs0",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "sequential final candidate, as stored",
+      "mask": {
+        "source": "MSs0"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "MSs0",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "own_MSs1",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "sequential final candidate, as stored",
+      "mask": {
+        "source": "MSs1"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "MSs1",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "own_MSs2",
+      "tier": "L",
+      "rq": "RQ1",
+      "purpose": "sequential final candidate, as stored",
+      "mask": {
+        "source": "MSs2"
+      },
+      "precision": "quantized",
+      "bits": {
+        "source": "MSs2",
+        "fill": "donor"
+      },
+      "repair": {
+        "scope": "none",
+        "seed": 0
+      },
+      "static_deficits": [
+        0,
+        0,
+        0
+      ],
+      "removed": [
+        8,
+        8
+      ]
+    }
+  ]
+}

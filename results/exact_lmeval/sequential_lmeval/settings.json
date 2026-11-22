@@ -1,0 +1,17 @@
+{
+  "base_model": "mistralai/Mistral-7B-v0.3",
+  "tasks": [
+    "arc_easy",
+    "piqa",
+    "winogrande"
+  ],
+  "num_fewshot": 0,
+  "batch_size": 4,
+  "limit": null,
+  "dtype": "float16",
+  "attn_implementation": "sdpa",
+  "tokenizer": "mistralai/Mistral-7B-v0.3 (fast)",
+  "lm_eval_version": "0.4.13",
+  "quant_db": "/home/jovyan/evopress_quant_stage1_1gpu_diskspill_attempt3_20260819/Mistral-7B-v0.3/3bit",
+  "target_bitwidth": 3
+}
