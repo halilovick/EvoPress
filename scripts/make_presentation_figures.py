@@ -100,11 +100,11 @@ def style_axes(ax) -> None:
 
 def rq1_figure(out: Path, table: list[dict]) -> None:
     labels = ["E1", "E2", "J12", "E3"]
-    names = ["Uniform\n3-bit", "Bit search,\nnothing removed", "Joint search,\n12.5% removed",
-             "Joint search,\n25% removed"]
+    names = ["Uniform\n3-bit", "Bit search,\nno removal", "Joint,\n12.5% removed",
+             "Joint,\n25% removed"]
     acc = accuracy()
     values = {lab: w2(lab) for lab in labels}
-    fig, ax = plt.subplots(figsize=(4.6, 2.9))
+    fig, ax = plt.subplots(figsize=(4.0, 2.7))
     for i, lab in enumerate(labels):
         vals = values[lab]
         mean = statistics.mean(vals)
@@ -112,7 +112,7 @@ def rq1_figure(out: Path, table: list[dict]) -> None:
         ax.bar(i, mean, width=0.62, color=color, edgecolor="white", linewidth=2, zorder=2)
         if len(vals) > 1:
             ax.scatter([i] * len(vals), vals, s=9, color=INK, zorder=3, linewidths=0)
-        ax.text(i, max(vals) + 0.18, f"{mean:.2f}", ha="center", va="bottom", fontsize=9,
+        ax.text(i, max(vals) + 0.18, f"{mean:.2f}", ha="center", va="bottom", fontsize=9.5,
                 color=INK, fontweight="bold")
         a = statistics.mean(acc[lab])
         table.append({"figure": "rq1", "label": lab, "wikitext2_mean": f"{mean:.3f}",
@@ -120,9 +120,9 @@ def rq1_figure(out: Path, table: list[dict]) -> None:
                       "zero_shot_mean_pct": f"{a:.1f}", "n_seeds": len(vals)})
         names[i] = f"{names[i]}\nacc. {a:.1f}%"
     ax.set_xticks(range(len(labels)), names, fontsize=7.5, color=DARK_GRAY)
-    ax.set_ylabel("WikiText-2 perplexity (lower is better)", fontsize=7.5, color=DARK_GRAY)
+    ax.set_ylabel("WikiText-2 perplexity ↓", fontsize=8, color=DARK_GRAY)
     ax.set_ylim(0, 10.2)
-    ax.tick_params(axis="y", labelsize=7.5)
+    ax.tick_params(axis="y", labelsize=8)
     style_axes(ax)
     fig.tight_layout()
     fig.savefig(out / "rq1_removal_vs_precision.pdf")
@@ -132,16 +132,16 @@ def rq1_figure(out: Path, table: list[dict]) -> None:
 
 def rq2_figure(out: Path, table: list[dict]) -> None:
     rows = [
-        ("E3", "Standard search (EvoPress design)"),
-        ("AO", "Mutation only on kept projections"),
-        ("P4", "Population of four (+33% tokens)"),
-        ("DW", "Warm start from a depth-only mask"),
-        ("LX", "Population + local-exchange crossover (1 seed)"),
-        ("LB", "Population + layer-bundle crossover (2 seeds)"),
+        ("E3", "Standard search"),
+        ("AO", "Mutation on kept projections"),
+        ("P4", "Population of 4 (+33% tokens)"),
+        ("DW", "Depth warm start"),
+        ("LX", "Pop. 4 + local exch. (1 seed)"),
+        ("LB", "Pop. 4 + layer bundle (2 seeds)"),
         ("IA", "Interaction-aware mutation"),
     ]
     ref = w2("E3")
-    fig, ax = plt.subplots(figsize=(4.9, 2.7))
+    fig, ax = plt.subplots(figsize=(3.9, 2.55))
     ax.axvspan(min(ref), max(ref), color=BAND, zorder=0, linewidth=0)
     for y, (lab, name) in enumerate(reversed(rows)):
         vals = w2(lab)
@@ -150,15 +150,15 @@ def rq2_figure(out: Path, table: list[dict]) -> None:
         ax.scatter(vals, [y] * len(vals), s=22, color=color, zorder=3, linewidths=0)
         ax.plot([mean, mean], [y - 0.28, y + 0.28], color=color, linewidth=2, zorder=3)
         n = len(vals)
-        ax.text(11.4, y, f"{mean:.2f}", va="center", ha="left", fontsize=7.5, color=INK,
+        ax.text(11.4, y, f"{mean:.2f}", va="center", ha="left", fontsize=8, color=INK,
                 fontweight="bold" if lab == "E3" else "normal")
         table.append({"figure": "rq2", "label": lab, "wikitext2_mean": f"{mean:.3f}",
                       "wikitext2_seeds": " ".join(f"{v:.4f}" for v in vals), "n_seeds": n})
-    ax.set_yticks(range(len(rows)), [name for _, name in reversed(rows)], fontsize=7.5, color=DARK_GRAY)
+    ax.set_yticks(range(len(rows)), [name for _, name in reversed(rows)], fontsize=8, color=DARK_GRAY)
     ax.set_xlim(8.3, 11.3)
     ax.set_ylim(-0.6, len(rows) - 0.4)
-    ax.set_xlabel("Final WikiText-2 perplexity (lower is better)", fontsize=7.5, color=DARK_GRAY)
-    ax.tick_params(axis="x", labelsize=7.5)
+    ax.set_xlabel("Final WikiText-2 perplexity ↓", fontsize=8, color=DARK_GRAY)
+    ax.tick_params(axis="x", labelsize=8)
     for side in ("top", "right", "left"):
         ax.spines[side].set_visible(False)
     ax.spines["bottom"].set_color(DARK_GRAY)
@@ -181,7 +181,7 @@ E3_LOGS = {
 
 
 def convergence_figure(out: Path, table: list[dict]) -> None:
-    fig, ax = plt.subplots(figsize=(5.2, 2.6))
+    fig, ax = plt.subplots(figsize=(4.6, 2.3))
     shades = {0: BLUE, 1: "#4f9ad0", 2: "#8bbbe0"}
     labels: list[tuple[float, int]] = []
     for seed, dirs in E3_LOGS.items():
@@ -211,9 +211,9 @@ def convergence_figure(out: Path, table: list[dict]) -> None:
         placed = y
     ax.set_ylim(8.4, 12.5)
     ax.set_xlim(0, 165)
-    ax.set_xlabel("Generation", fontsize=7.5, color=DARK_GRAY)
-    ax.set_ylabel("WikiText-2 perplexity", fontsize=7.5, color=DARK_GRAY)
-    ax.tick_params(labelsize=7.5)
+    ax.set_xlabel("Generation", fontsize=8, color=DARK_GRAY)
+    ax.set_ylabel("WikiText-2 perplexity", fontsize=8, color=DARK_GRAY)
+    ax.tick_params(labelsize=8)
     style_axes(ax)
     ax.text(70, 12.2, "dot = last accepted change of the mask", fontsize=7, color=DARK_GRAY, va="top")
     fig.tight_layout()
