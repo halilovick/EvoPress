@@ -100,7 +100,7 @@ def style_axes(ax) -> None:
 
 def rq1_figure(out: Path, table: list[dict]) -> None:
     labels = ["E1", "E2", "J12", "E3"]
-    names = ["Uniform\n3-bit", "Bit search,\nno removal", "Joint,\n12.5% removed",
+    names = ["Uniform\n3-bit", "Quantization\nsearch,\n3-bit budget", "Joint,\n12.5% removed",
              "Joint,\n25% removed"]
     acc = accuracy()
     values = {lab: w2(lab) for lab in labels}
