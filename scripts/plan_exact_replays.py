@@ -96,6 +96,12 @@ def parse_args(argv=None) -> argparse.Namespace:
         action="store_true",
         help="Add 12.5%% independent-composition jobs (requires stage-0 depth masks).",
     )
+    parser.add_argument(
+        "--tier_b3",
+        action="store_true",
+        help="Write only the Tier B3 plan (RQ3 pooled extension): every 25%% pair not covered by "
+        "Tier A/B/B2, shared-gene exchange plus deficit-matched null control.",
+    )
     return parser.parse_args(argv)
 
 
@@ -322,6 +328,12 @@ def build_plan(sources, groups, analysis, include_125: bool) -> dict[str, Any]:
             jobs.append(job(f"fp16_h{tag}_{rule}", "D", "RQ1 reference", "16-bit heuristic depth-only evaluation",
                             {"rule": rule, "k_attn": k, "k_mlp": k, "seed": 0}, precision="fp16"))
 
+    finalize_jobs(jobs, sources, groups)
+
+    return plan_dict(jobs, sources)
+
+
+def finalize_jobs(jobs, sources, groups) -> None:
     # Static validation of every job whose bits can be built without the model.
     for entry in jobs:
         mask = entry["mask"]
@@ -337,6 +349,9 @@ def build_plan(sources, groups, analysis, include_125: bool) -> dict[str, Any]:
                 entry["repair"]["fallback_from"] = "exclusive"
                 entry["id"] = entry["id"].replace("_exclusive_", "_all_")
 
+
+
+def plan_dict(jobs, sources) -> dict[str, Any]:
     return {
         "version": 1,
         "reference_bitwidth": 3,
@@ -345,6 +360,38 @@ def build_plan(sources, groups, analysis, include_125: bool) -> dict[str, Any]:
         "sources": {label: cand["source"] for label, cand in sources.items()},
         "jobs": jobs,
     }
+
+
+# Pairs already evaluated by Tier A/B/B2 (either order).
+COVERED_PAIRS = {
+    frozenset(p) for p in (
+        ("E3s0", "E3s1"), ("E3s0", "E3s2"), ("E3s1", "E3s2"), ("J12s0", "J12s2"), ("J12s1", "J12s2"),
+        ("J12s0", "J12s1"), ("E3s1", "DWs0"),
+        ("E3s0", "LXs0"), ("IAs0", "LXs0"), ("E3s2", "IAs0"), ("IAs0", "IAs1"), ("E3s1", "P4s1"),
+        ("IAs0", "DWs0"), ("E3s0", "IAs2"),
+    )
+}
+
+
+def build_b3_plan(sources, groups, analysis) -> dict[str, Any]:
+    """Tier B3: all remaining 25% pairs, shared-gene exchange + null control.
+
+    Pairs without an interaction-aware (IA) candidate go to tiers ``B3`` /
+    ``B3-ctrl``; pairs with an IA candidate go to ``B3i`` / ``B3i-ctrl`` so the
+    two groups can be run (and analysed) separately.
+    """
+    jobs: list[dict[str, Any]] = []
+    for r in sorted(analysis, key=lambda r: (r["a"], r["b"])):
+        a, b = r["a"], r["b"]
+        if r["sparsity"] != 0.25 or frozenset((a, b)) in COVERED_PAIRS or r["owner_repair_free_pair"]:
+            continue
+        tag = "B3i" if ("IA" in a or "IA" in b) else "B3"
+        jobs += crossed_jobs(a, b, "owner", "exclusive", tag, "shared-gene exchange, pooled RQ3 extension",
+                             r["owner_deficits_DA_QB"], r["owner_deficits_DB_QA"])
+        jobs += random_fill_jobs(a, b, f"{tag}-ctrl", "null control: deficit-matched random shared-gene fill")
+        jobs += random_fill_jobs(b, a, f"{tag}-ctrl", "null control: deficit-matched random shared-gene fill")
+    finalize_jobs(jobs, sources, groups)
+    return plan_dict(jobs, sources)
 
 
 def write_outputs(out: Path, analysis, plan) -> None:
@@ -403,7 +450,10 @@ def main(argv=None) -> None:
     for label in FULLSPACE_CANDIDATES:
         validate_group_budget(groups, sources[label]["bits"], sources[label]["drop"])
     analysis = pair_analysis(sources, groups)
-    plan = build_plan(sources, groups, analysis, args.include_depth_only_125)
+    if args.tier_b3:
+        plan = build_b3_plan(sources, groups, analysis)
+    else:
+        plan = build_plan(sources, groups, analysis, args.include_depth_only_125)
     write_outputs(Path(args.output_dir), analysis, plan)
     print(f"pairs={len(analysis)} owner_repair_free={sum(r['owner_repair_free_pair'] for r in analysis)} "
           f"jobs={len(plan['jobs'])}")
